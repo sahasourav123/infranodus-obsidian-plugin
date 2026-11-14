@@ -13,6 +13,7 @@ import {
 	BookIcon,
 	LinkIcon,
 	RepoPullIcon,
+	NoteIcon,
 } from "@primer/octicons-react";
 import { copyToClipboard } from "src/utils/clipboard";
 import { INTERNAL_SETTINGS, SETTINGS } from "src/settings";
@@ -32,7 +33,6 @@ import { MarkdownText } from "src/components/MarkdownText";
 import { getPureTextFromMarkdown } from "src/utils/line";
 import { encodeInfraNodusGraphName } from "src/utils/graph";
 import { App, Notice, TFile, Platform, Modal, Setting } from "obsidian";
-import { GraphNameModal } from "../../components/GraphNameModal";
 import {
 	findFileFromName,
 	findFileFromPath,
@@ -46,23 +46,8 @@ import {
 } from "../lib/jumpToStatement";
 import { editStatementsOfFile } from "src/utils/editFile";
 import { addLinksToStatementsForFilePath } from "../lib/addLinksToStatement";
-import { exportGraphToInfraNodus } from "../lib/exportGraphToInfraNodus";
+import { saveTextToNote } from "../lib/saveToNote";
 
-import { InfraNodus } from "../../infranodus";
-
-enum EventTypes {
-	LOAD = "LOAD_JSON",
-	REMOVED_NODES = "UPDATE_REMOVED_NODES",
-	SELECTED_NODES = "UPDATE_SELECTED_NODES",
-	GROUPS = "UPDATE_GROUPS",
-	GROUPS_PRESELECT = "GROUPS_PRESELECT",
-	GAPS = "GAPS",
-	GAPS_SHOW = "GAPS_SHOW",
-	READY = "READY",
-	RECALCULATION = "RECALCULATION",
-	TOPICS_UPDATE = "TOPICS_UPDATE",
-	EXTERNAL_ACTION = "EXTERNAL_ACTION",
-}
 
 const GraphViewOverlay = (params: {
 	graphViewContext: GraphViewContext;
@@ -76,7 +61,7 @@ const GraphViewOverlay = (params: {
 	filteredStatements: StatementsObject[];
 	topicsFiltered: string[];
 	navigateToStatement: any;
-	sendDataToIframe: (type: string, payload: any) => void;
+	showGap: (index: number) => void;
 	currentGraphPanel: "graph" | "topics" | "gaps" | "trends" | "concepts";
 }) => {
 	let adviceMode = params.graphViewContext.adviceMode;
@@ -112,11 +97,6 @@ const GraphViewOverlay = (params: {
 	const [showingSettings, setShowingSettings] = useState(false);
 
 	const [jumpIteration, setJumpIteration] = useState(0);
-
-	const exportToInfraNodus = {
-		type: SETTINGS.EXPORT_TYPE,
-		graphName: SETTINGS.EXPORT_GRAPH,
-	};
 
 	const [currentUser, setCurrentUser] = useState<string>(
 		graphViewContext.currentUser ? graphViewContext.currentUser : ""
@@ -225,24 +205,13 @@ const GraphViewOverlay = (params: {
 							onClick={() => {
 								setOverlayShowMode("ai");
 
-								if (!topicsFiltered && !graphViewContext) {
-									params.sendDataToIframe(EventTypes.GAPS, 1);
-									params.sendDataToIframe(
-										EventTypes.GAPS_SHOW,
-										1
-									);
-								}
 								if (
 									topicsFiltered &&
 									topicsFiltered.length == 0 &&
 									graphViewContext?.wordsToSearch &&
 									graphViewContext?.wordsToSearch.length == 0
 								) {
-									params.sendDataToIframe(EventTypes.GAPS, 1);
-									params.sendDataToIframe(
-										EventTypes.GAPS_SHOW,
-										1
-									);
+									params.showGap(1);
 								}
 							}}
 							label={`${
@@ -524,44 +493,35 @@ const GraphViewOverlay = (params: {
 								</span>
 							</InfoTooltip>
 
-							{/* Go to InfraNodus */}
-							<InfoTooltip text="Save this to InfraNodus">
+							{/* Save to a note */}
+							<InfoTooltip text="Save this to a note">
 								<span
 									className="flex flex-row items-center gap-1 ml-4 text-sm font-bold cursor-pointer"
 									onClick={() => {
-										if (adviceMode === "context") {
-											// Whole analyzed text: direct
-											// API export (URL import breaks
-											// on big texts)
-											exportGraphToInfraNodus({
-												app,
-												text: textToShow,
-												defaultGraphName:
-													encodeInfraNodusGraphName(
-														filePath || "",
-														SETTINGS.EXPORT_GRAPH,
-														vaultName
-													),
-												sourceFile: filePath,
-											});
-										} else {
-											goToInfraNodus({
-												textToShow,
-												contextName: filePath,
-												exportToInfraNodus,
-												adviceMode,
-												vaultName,
-												app,
-											});
-										}
+										saveTextToNote({
+											app,
+											text: textToShow,
+											kind:
+												adviceMode === "context"
+													? "Excerpt"
+													: adviceMode === "summary"
+													? "Summary"
+													: adviceMode === "question"
+													? "Question"
+													: adviceMode === "develop"
+													? "Idea"
+													: adviceMode === "transcend"
+													? "Idea beyond"
+													: "Graph AI",
+											sourcePath: filePath,
+											context:
+												graphViewContext.wordsToSearch.join(", ") ||
+												undefined,
+										}).catch((e) => new Notice(String(e)));
 									}}
 								>
-									<CrossReferenceIcon size={16} />
-									{adviceMode === "context" ? (
-										<span>save</span>
-									) : (
-										<span>save clip</span>
-									)}
+									<NoteIcon size={16} />
+									<span>save</span>
 								</span>
 							</InfoTooltip>
 
@@ -636,71 +596,6 @@ const GraphViewOverlay = (params: {
 		</>
 	);
 };
-
-async function goToInfraNodus({
-	textToShow = "",
-	contextName = "",
-	exportToInfraNodus = { type: "manual", graphName: "" },
-	adviceMode = "",
-	vaultName = "",
-	//@ts-ignore
-	app,
-}) {
-	if (!textToShow || textToShow === "ai generating...") {
-		// console.log("no data to send to InfraNodus");
-		return;
-	}
-
-	const encodedText = encodeURIComponent(textToShow);
-	const encodedContext =
-		adviceMode != "context"
-			? encodeInfraNodusGraphName(
-					contextName,
-					SETTINGS.CONTEXT_NAME,
-					vaultName
-			  )
-			: encodeInfraNodusGraphName(
-					contextName,
-					SETTINGS.EXPORT_GRAPH,
-					vaultName
-			  );
-	const linkToOpen = `${SETTINGS.INFRANODUS_API_URL}/import/editor?text=${encodedText}&context=${encodedContext}`;
-
-	if (exportToInfraNodus && exportToInfraNodus.type === "auto") {
-		// Change the context name to just be the page title?
-		const graphTags = [`context: ${encodedContext}`];
-		let graphName = encodedContext;
-
-		// Show dialog to confirm/edit graph name
-		graphName =
-			(await new Promise<string | null>((resolve) => {
-				new GraphNameModal(app, graphName, resolve).open();
-			})) || "";
-
-		if (!graphName) {
-			return;
-		}
-
-		const dataToSave = {
-			contextName: graphName,
-			text: textToShow,
-			tags: graphTags,
-		};
-
-		const exportStatus = await InfraNodus.exportText(dataToSave);
-
-		// console.log("InfraNodus export status", exportStatus);
-		if (exportStatus.error) {
-			alert(
-				`There was an error saving to the ${graphName} graph in InfraNodus. Reload the page and try again or change your extension setting.`
-			);
-		} else {
-			alert(`Saved to the ${graphName} graph in InfraNodus`);
-		}
-	} else {
-		window.open(linkToOpen, "_blank");
-	}
-}
 
 export { GraphViewOverlay };
 

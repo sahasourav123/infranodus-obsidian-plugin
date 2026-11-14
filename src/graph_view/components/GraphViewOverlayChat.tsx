@@ -2,23 +2,21 @@ import {
 	ArrowUpIcon,
 	CheckIcon,
 	CopyIcon,
-	CrossReferenceIcon,
 	IterationsIcon,
 	PlusCircleIcon,
 	XIcon,
 	QuoteIcon,
+	NoteIcon,
 } from "@primer/octicons-react";
 
 import { Platform } from "obsidian";
-
-import { jwtDecode } from "jwt-decode";
 
 import type { ChatHistory, GraphViewStateRef } from "../types";
 import type { InfraNodusExtractedGraphData } from "../../infranodus/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InfraNodus } from "../../infranodus";
 import { INTERNAL_SETTINGS, SETTINGS } from "../../settings";
-import { GraphNameModal } from "../../components/GraphNameModal";
+import { saveTextToNote } from "../lib/saveToNote";
 
 import { encodeInfraNodusGraphName } from "src/utils/graph";
 
@@ -281,10 +279,7 @@ const GraphViewOverlayChat = (params: {
 		setBeyondContext((prev) => !prev);
 	};
 
-	const exportToInfraNodus = {
-		type: SETTINGS.EXPORT_TYPE,
-		graphName: SETTINGS.CONTEXT_NAME,
-	};
+	const exportToInfraNodus = null;
 
 	const [currentUser, setCurrentUser] = useState<string>(
 		params.currentUser ?? ""
@@ -536,9 +531,10 @@ const GraphViewOverlayChat = (params: {
 
 			// Recursion check not necessary now, but might in the future,
 			// when there are more conditions / stuff
-			const maxRecursion = 5;
-			const currentRecursion = 0;
-			while (currentRecursion < maxRecursion) {
+			const maxRecursion = 1;
+			let currentRecursion = 0;
+			while (currentRecursion < maxRecursion && !beyondContext) {
+				currentRecursion++;
 				if (extractedStatements.length !== 0) break;
 				// if (similarityThreshold === "0.01") {
 				// 	globalChatHistory.pop();
@@ -613,10 +609,22 @@ const GraphViewOverlayChat = (params: {
 				}
 			);
 
+			// Semantic matches first, then the statements of the current
+			// selection, capped to the configured context size
+			const contextBudget = Number(SETTINGS.AI_MAX_CONTEXT_CHARS) || 40000;
+			let usedChars = 0;
+			const seenContent = new Set<string>();
 			const allStatementsForChat = [
-				...filteredStatements,
 				...statementsWithIds,
-			];
+				...filteredStatements,
+			].filter((statement: any) => {
+				const content = String(statement.content || "");
+				if (!content || seenContent.has(content)) return false;
+				if (usedChars + content.length > contextBudget) return false;
+				seenContent.add(content);
+				usedChars += content.length;
+				return true;
+			});
 
 			const chatHistoryToAdd = globalChatHistory.map((obj, index) => {
 				return { type: obj.type, message: obj.message };
@@ -671,7 +679,8 @@ const GraphViewOverlayChat = (params: {
 			// console.log("RESPONSE FROM CHAT GPT", response.data);
 			setChatResponse(response.data);
 		} catch (error) {
-			// console.log("InfraNodus Error: error processing RAG search", error);
+			console.error("[graph-ai] chat failed", error);
+			setChatResponse({ error: error?.message || String(error) });
 		}
 
 		setIsLoadingAiMessage(false);
@@ -709,6 +718,8 @@ const GraphViewOverlayChat = (params: {
 		const textResponse =
 			chatResponse && chatResponse.choices && chatResponse.choices[0]
 				? chatResponse.choices[0].message.content
+				: chatResponse?.error
+				? `⚠️ ${chatResponse.error}`
 				: "";
 		setIsLoadingAiMessage(false);
 		if (!textResponse) return;
@@ -932,9 +943,7 @@ const GraphViewOverlayChat = (params: {
 												{exporting ? (
 													<CheckIcon size={16} />
 												) : (
-													<CrossReferenceIcon
-														size={14}
-													/>
+													<NoteIcon size={14} />
 												)}
 											</div>
 										</div>
@@ -1029,7 +1038,7 @@ const GraphViewOverlayChat = (params: {
 											{exporting ? (
 												<CheckIcon size={16} />
 											) : (
-												<CrossReferenceIcon size={14} />
+												<NoteIcon size={14} />
 											)}
 										</div>
 									</div>
@@ -1063,7 +1072,7 @@ const GraphViewOverlayChat = (params: {
 												})
 											}
 										>
-											<CrossReferenceIcon size={14} />
+											<NoteIcon size={14} />
 										</div>
 									</div>
 								)}
@@ -1284,14 +1293,11 @@ function scrollToText(text: string) {
 	// console.log("InfraNodus Error: Selected text not found in the document");
 }
 
+// Saves a chat message as a note (replaces "save to InfraNodus")
 async function goToInfraNodus({
 	text,
 	previousMessage = undefined,
-	graphContext = null,
-	currentUser = undefined,
-	exportToInfraNodus = undefined,
 	setExporting,
-	vaultName = "",
 }: {
 	text: string;
 	previousMessage?: string;
@@ -1301,61 +1307,17 @@ async function goToInfraNodus({
 	setExporting: any;
 	vaultName: string;
 }): Promise<void> {
-	const contextName = SETTINGS.CONTEXT_NAME;
-	const linkToOpen = `${
-		SETTINGS.INFRANODUS_API_URL
-	}/import/editor?text=${encodeURIComponent(
-		text
-	)}&context=${encodeURIComponent(contextName)}`;
-
-	if (exportToInfraNodus && exportToInfraNodus.type === "auto") {
-		// Change the context name to just be the page title?
-		const graphTags = [
-			`context: ${SETTINGS.CONTEXT_NAME}`,
-			`source: chat respose`,
-		];
-
-		let graphName = encodeInfraNodusGraphName(
-			exportToInfraNodus.graphName,
-			SETTINGS.CONTEXT_NAME,
-			vaultName
-		);
-
-		// Show dialog to confirm/edit graph name
-		graphName =
-			(await new Promise<string | null>((resolve) => {
-				new GraphNameModal(app, graphName, resolve).open();
-			})) || "";
-
-		if (!graphName) {
-			return;
-		}
-
-		setExporting(true);
-
-		// console.log("exporting text to InfraNodus");
-		const exportStatus = await InfraNodus.exportText({
-			contextName: graphName,
-			text,
-			tags: graphTags,
+	setExporting(true);
+	try {
+		await saveTextToNote({
+			app: (window as any).app,
+			text: previousMessage
+				? `> ${previousMessage.split("\n").join("\n> ")}\n\n${text}`
+				: text,
+			kind: "Chat",
 		});
-		// const exportStatus = await exportTextToInfraNodus(
-		// 	graphName,
-		// 	text,
-		// 	graphTags
-		// );
-		// console.log("InfraNodus export status", exportStatus);
-		if (exportStatus.error) {
-			alert(
-				`There was an error saving to the ${graphName} graph in InfraNodus. Reload the page and try again or change your extension setting.`
-			);
-		} else {
-			alert(`Saved to the ${graphName} graph in InfraNodus`);
-		}
-
-		setExporting(false);
-	} else {
-		window.open(linkToOpen, "_blank");
+	} finally {
+		setTimeout(() => setExporting(false), 1500);
 	}
 }
 

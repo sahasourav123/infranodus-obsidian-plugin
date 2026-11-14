@@ -1,107 +1,52 @@
-import {
-	GraphAndStatementProcessingType,
-	INTERNAL_SETTINGS,
-	SETTINGS,
-} from "src/settings";
-
-import { requestUrl } from "obsidian";
+import { GraphAndStatementProcessingType, SETTINGS } from "src/settings";
 
 import { AnswerInfraNodusTopics } from "src/types/messaging";
 import { InfraNodusExtractedGraphData } from "./types";
 import { StatementsObject, TopicsObject } from "src/types/general";
 import { AdviceMode } from "src/graph_view/types";
-import { replaceAtWithBrackets } from "src/utils/statements";
 
 import { PossibleError } from "src/graph_view/components/ErrorHandler";
 import { INFRANODUS_API_ERROR_PREFIX } from "src/graph_view/lib/handleErrors";
 import { GraphPanel } from "src/graph_view/types";
 
+import { buildGraphAndStatements } from "src/engine/textNetwork";
+import { complete } from "src/ai/client";
+import {
+	buildAdvicePrompt,
+	buildChatSystem,
+	buildTopicNamesPrompt,
+	parseTopicNames,
+	splitAlternatives,
+} from "src/ai/prompts";
+import { findRelatedStatements } from "src/ai/search";
+
 const MAX_CONTEXT_SIZE = 54000;
 
-const AI_MODELS_FALLBACK = ["gpt-5.4", "gpt-5.4-mini"];
-
+/**
+ * Local replacement for the InfraNodus API client. The method names and
+ * response shapes are kept so the UI code is unchanged:
+ *  - graph building runs in src/engine (no network)
+ *  - AI calls go to the provider configured for each task (src/ai)
+ */
 class InfraNodus {
-	public static async fetchAiModels(): Promise<string[]> {
-		try {
-			const auth_token = SETTINGS.INFRANODUS_API_KEY;
-			const headers: Record<string, string> = {};
-			if (auth_token) headers.Authorization = `Bearer ${auth_token}`;
-			const response = await requestUrl({
-				method: "GET",
-				url: `${SETTINGS.INFRANODUS_API_URL}/api/v1/aiModels`,
-				headers,
-			});
-			const data = response.json;
-			const models = Array.isArray(data)
-				? data
-				: data?.ai_models ?? data?.aiModels ?? data?.models;
-			if (Array.isArray(models) && models.length > 0) return models;
-			return AI_MODELS_FALLBACK;
-		} catch (e) {
-			console.log("Error fetching AI models, falling back on default", e);
-			return AI_MODELS_FALLBACK;
-		}
-	}
-
-	public static async genericPost(url: string, body: any, moreFields?: any) {
-		const auth_token = SETTINGS.INFRANODUS_API_KEY;
-
-		if (url.startsWith("/")) url = url.slice(1);
-
-		const response = await requestUrl({
-			method: "POST",
-			url: `${SETTINGS.INFRANODUS_API_URL}/${url}`,
-			headers: {
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${auth_token}`,
-			},
-			body: JSON.stringify(body),
-			...moreFields,
-		});
-
-		try {
-			const data = await response.json;
-			return { data };
-		} catch (e) {
-			console.error(e);
-			throw e;
-		}
-	}
-
 	public static async generateRelatedStatements(params: {
 		query: any;
 		text: any;
 		similarityThreshold: any;
 	}) {
-		const infraNodusInquiryMode = "aiSearch";
-
-		const queryToSearch = params.query;
-		const textToProcess = params.text;
 		const similarityThreshold = params.similarityThreshold
 			? parseFloat(params.similarityThreshold)
 			: 0.3;
-
-		// console.log("gettting ai search with,", {
-		// 	mode: infraNodusInquiryMode,
-		// 	embeddingType: "query",
-		// 	text: textToProcess,
-		// 	searchQuery: queryToSearch,
-		// 	numberOfResults: 10,
-		// 	similarityThreshold: similarityThreshold,
-		// });
-		const response = await this.genericPost("api/v1/aiSearch", {
-			mode: infraNodusInquiryMode,
-			embeddingType: "query",
-			text: textToProcess,
-			searchQuery: queryToSearch,
+		const statements: string[] = Array.isArray(params.text)
+			? params.text
+			: String(params.text || "").split("\n");
+		const data = await findRelatedStatements({
+			query: String(params.query || ""),
+			statements,
+			similarityThreshold,
 			numberOfResults: 10,
-			similarityThreshold: similarityThreshold,
 		});
-		// console.log(
-		// 	"RESPONSE FROM AI SEARCH",
-		// 	JSON.stringify(response, null, 2)
-		// );
-		return response;
+		return { data };
 	}
 
 	public static async getGraphAndStatements(params: {
@@ -112,100 +57,31 @@ class InfraNodus {
 		statements?: string[];
 		categories?: string[][];
 		linkPageToMentions?: string;
-		// partOfSpeechToProcess?: "HASHTAGS_ONLY" | "HASHTAGS_AND_WORDS";
 	}): Promise<{ data: AnswerInfraNodusTopics }> {
-		// console.log("PARAMS", params);
-		const body: { [key: string]: any } = {
-			name: params.name,
-			text:
-				params.statements && params.statements.length > 0
-					? ""
-					: params.text,
-		};
-
-		if (params.statements) {
-			body.statements = params.statements;
-		}
-
-		if (params.contextSettings === "[[Wiki Links]] and Concepts") {
-			body.contextSettings = {
-				partOfSpeechToProcess: "HASHTAGS_AND_WORDS",
-				doubleSquarebracketsProcessing: "PROCESS_AS_HASHTAGS",
-			};
-		}
-
-		if (params.contextSettings === "[[Wiki Links]] Only") {
-			body.contextSettings = {
-				partOfSpeechToProcess: "HASHTAGS_ONLY",
-				doubleSquarebracketsProcessing: "PROCESS_AS_HASHTAGS",
-			};
-		}
-
-		if (params.contextSettings === "[[Wiki Links]] Prioritized") {
-			body.contextSettings = {
-				partOfSpeechToProcess: "WORDS_IF_NO_HASHTAGS",
-				doubleSquarebracketsProcessing: "PROCESS_AS_HASHTAGS",
-			};
-		}
-
-		if (params.contextSettings === "Concepts only") {
-			body.contextSettings = {
-				partOfSpeechToProcess: "HASHTAGS_AND_WORDS",
-				doubleSquarebracketsProcessing: "EXCLUDE",
-			};
-		}
-
-		if (params.stopwords && params.stopwords.length > 0) {
-			body.contextSettings = {
-				...body.contextSettings,
-				lemmatizeHashtags: true,
+		// let the loading state render before the synchronous analysis
+		await new Promise((resolve) => setTimeout(resolve, 20));
+		try {
+			const data = buildGraphAndStatements({
+				text: params.text,
+				statements:
+					params.statements && params.statements.length > 0
+						? params.statements
+						: undefined,
+				categories: params.categories,
+				contextSettings: params.contextSettings,
 				stopwords: params.stopwords,
+				linkPageToMentions: params.linkPageToMentions,
+				maxNodes: Number(SETTINGS.MAX_GRAPH_NODES) || 300,
+			});
+			return { data };
+		} catch (err) {
+			console.error("[graph-ai] local graph analysis failed", err);
+			return {
+				data: {
+					error: `Local graph analysis failed: ${err?.message || err}`,
+				} as any,
 			};
 		}
-
-		if (params.categories && params.categories.length > 0) {
-			body.categories = params.categories;
-			body.contextSettings = {
-				...body.contextSettings,
-				categoriesAsMentions: true,
-				mentionsProcessing: "CONNECT_TO_ALL_CONCEPTS",
-				squareBracketsProcessing: "IGNORE_BRACKETS",
-			};
-		}
-
-		if (params.linkPageToMentions == "parent_only") {
-			body.contextSettings = {
-				...body.contextSettings,
-				mentionsProcessing: "CONNECT_TO_CONCEPTS_ONLY",
-			};
-		}
-		// TODO ability to send statements with categories, so we can also tag actual files they belong to on the graph
-
-		// console.log("body", body);
-		const response: { data: AnswerInfraNodusTopics } =
-			await this.genericPost(
-				"api/v1/graphAndStatements?doNotSave=true&addStats=true&dotGraph=true&optimize=develop",
-				body
-			);
-
-		return replaceAtWithBrackets(response);
-	}
-
-	public static async getGraphAiAdvice(params: {
-		nodes: [];
-		edges: [];
-		graph: {
-			top_nodes: [];
-			top_clusters: [];
-			gaps: [];
-			statementHashtags: [];
-		};
-	}) {
-		return await this.genericPost("api/v1/graphAiAdvice", {
-			nodes: params.nodes,
-			edges: params.edges,
-			graph: params.graph,
-		});
 	}
 
 	public static extractDataFromGraphData(params: {
@@ -403,52 +279,30 @@ class InfraNodus {
 		language: string;
 		top_statements: any[];
 	}) {
-		const { prompt, promptContext } = InfraNodus.generatePromptForAiTopics({
-			topics_answer: params.graph_data,
-			top_statements: params.top_statements,
+		const clusters = params.top_clusters.map((topic: any) => ({
+			id: String(topic.id ?? topic.community),
+			words: (topic.nodes || []).map((n: any) => n.nodeName),
+		}));
+		if (clusters.length === 0) return [];
+		const statements = (params.top_statements || [])
+			.filter((s: any) => s && s.content)
+			.map((s: any) => ({
+				community: String(s.topStatementOfCommunity),
+				content: s.content,
+			}));
+		const { system, user } = buildTopicNamesPrompt({ clusters, statements });
+		const text = await complete("topics", {
+			system,
+			messages: [{ role: "user", content: user }],
+			maxTokens: 1500,
+			temperature: 0.3,
 		});
-
-		// console.log(
-		// 	"Prompt for AI names for topics",
-		// 	prompt,
-		// 	SETTINGS.AI_MODEL
-		// );
-		const topicsText = await this.genericPost("api/v1/aiAdvice", {
-			mode: "topics",
-			prompt: "",
-			promptGraph: "",
-			promptContext: promptContext,
-			language: params.language == "USER" ? "" : params.language,
-			topicalClusters: prompt ?? [],
-		});
-
-		const aiTopicsLines = topicsText.data.choices[0].text.split("\n");
-
-		const topics: { id: string; name: string; description: string }[] =
-			params.top_clusters.map((topic: any, index: number) => {
-				const tempTopicArray =
-					aiTopicsLines && aiTopicsLines[index]
-						? aiTopicsLines[index].split(". ")
-						: [];
-
-				let aiName = tempTopicArray[1]
-					? tempTopicArray[1]
-					: aiTopicsLines[index]
-					? aiTopicsLines[index]
-					: "";
-
-				if (aiName && aiName.startsWith('"')) aiName = aiName.slice(1);
-				if (aiName && aiName.endsWith('"'))
-					aiName = aiName.slice(0, -1);
-
-				return {
-					id: topic.id || topic.community,
-					name: aiName,
-					description: "",
-				};
-			});
-
-		return topics;
+		const names = parseTopicNames(text, clusters.length);
+		return clusters.map((c, i) => ({
+			id: c.id,
+			name: names[i] || c.words.slice(0, 3).join(" "),
+			description: "",
+		}));
 	}
 
 	public static generatePromptForAdvice(params: {
@@ -611,9 +465,8 @@ class InfraNodus {
 
 		currentContextSize += dotGraph.length;
 
-		const maxPromptSizeForModel = SETTINGS?.AI_MODEL.includes("gpt-3")
-			? Math.floor(MAX_CONTEXT_SIZE / 4)
-			: MAX_CONTEXT_SIZE;
+		const maxPromptSizeForModel =
+			Number(SETTINGS.AI_MAX_CONTEXT_CHARS) || MAX_CONTEXT_SIZE;
 
 		const defaultSizePerTopic =
 			params.adviceMode == "summary" ? 5000 : 1500;
@@ -818,8 +671,11 @@ class InfraNodus {
 		};
 	}
 
-	// Code got from `src/background/providers/infranodus.ts - (from extension code)
-	// Use the `sendDataToPort` function - (from extension code)
+	/**
+	 * AI advice / chat. Returns `{ data: { choices } }` like the InfraNodus
+	 * API did: `choices[i].text` for advice, `choices[0].message.content`
+	 * for chat responses.
+	 */
 	public static async generateAdvice(params: {
 		prompt: string;
 		language?: string;
@@ -829,158 +685,37 @@ class InfraNodus {
 		source?: string;
 		modal?: string;
 		requestMode?: string;
-	}) {
-		if (!params.language) params.language = "en";
-
-		const infraNodusInquiryMode =
-			params.type === "chatResponse" ? "response" : params.type;
-
-		const simplePrompt = params.prompt;
-
-		const chatPrompt = [];
-		if (infraNodusInquiryMode == "response") {
-			chatPrompt.push({ role: "user", content: simplePrompt });
-		}
-		// console.log("Generate advice with", SETTINGS.AI_MODEL);
-		const body: any = {
-			mode: infraNodusInquiryMode ?? "",
-			type: params.type ?? "",
-			prompt: chatPrompt.length > 0 ? chatPrompt : simplePrompt,
-			promptGraph: params.promptGraph ?? "",
-			promptContext: params.promptContext ?? "",
-			language: params.language == "USER" ? "" : params.language,
-			modelToUse: SETTINGS.AI_MODEL,
-			extendedMode: "true",
-			app: "obsidian_plugin",
-			source: params.source ?? "",
-			modal: params.modal ?? "",
-		};
-		if (params.requestMode) body.requestMode = params.requestMode;
-		return await this.genericPost("api/v1/aiAdvice", body);
-	}
-
-	// public static async generateTopics(text: string) {
-	// 	const response1 = await InfraNodus.getGraphAndStatements({
-	// 		name: "Obsidian Plugin",
-	// 		text: text,
-	// 	});
-
-	// 	const graph_data = response1.data;
-	// 	const topics_answer = graph_data;
-
-	// 	const prompt = InfraNodus.generatePromptForAiTopics({ topics_answer });
-	// 	const response = await InfraNodus.generateAdvice({
-	// 		prompt,
-	// 		language: "en",
-	// 	});
-
-	// 	const topics: string = (response as any).data.choices[0].text;
-	// 	return { topics, graph_data };
-	// }
-
-	public static async exportText(params: {
-		contextName: string;
-		text: string;
-		tags: string[];
-		// Ask the API for topics, content gaps and a structural overview in
-		// the same request — needed when registering the exported graph in
-		// the vault's infranodus/manifest.json (no extra round-trip)
-		extendedSummary?: boolean;
-	}) {
+	}): Promise<{ data: any }> {
 		try {
-			const summaryQuery = params.extendedSummary
-				? "&extendedGraphSummary=true&includeGraphSummary=true"
-				: "";
-			const body: any = {
-				name: params.contextName,
-				text: params.text,
-				categories: params.tags,
-			};
-			if (params.extendedSummary) body.aiTopics = true;
+			if (params.type === "chatResponse" || params.type === "response") {
+				const text = await complete("chat", {
+					system: buildChatSystem(params.promptGraph || ""),
+					messages: [{ role: "user", content: params.prompt }],
+				});
+				return {
+					data: { choices: [{ message: { role: "assistant", content: text }, text }] },
+				};
+			}
 
-			const postResult = await this.genericPost(
-				`api/v1/graphAndStatements?doNotSave=false&addStats=true${summaryQuery}&contextName=${encodeURIComponent(
-					params.contextName
-				)}`,
-				body,
-				{ credentials: "include" }
+			const mode = params.requestMode === "transcend" ? "transcend" : params.type || "summary";
+			const built = buildAdvicePrompt({
+				mode,
+				prompt: params.prompt,
+				promptGraph: params.promptGraph,
+				promptContext: params.promptContext,
+			});
+			const text = await complete("insights", {
+				system: built.system,
+				messages: [{ role: "user", content: built.user }],
+			});
+			const choices = (built.alternatives ? splitAlternatives(text) : [text]).map(
+				(t) => ({ text: t })
 			);
-
-			// console.log("infranodus post result", postResult);
-
-			if (postResult?.data?.error) {
-				console.error(
-					"InfraNodus export returned an error",
-					postResult.data.error
-				);
-				return { error: true };
-			}
-
-			return { success: true, data: postResult?.data };
+			return { data: { choices } };
 		} catch (err) {
-			console.error("Error when submitting content to InfraNodus", err);
-			return { error: true };
+			console.error("[graph-ai] AI request failed", err);
+			return { data: { error: err?.message || String(err), choices: [] } };
 		}
-	}
-
-	// Cached InfraNodus user id, keyed by the API key it was fetched with —
-	// the id never changes for a given key, so one fetch per session is
-	// enough. Keeping the iframe URL stable from the first render also
-	// prevents the graph viewer from rebooting mid-load when the id arrives
-	private static userIdCache: { apiKey: string; userId: string } | null =
-		null;
-	private static userIdInFlight: {
-		apiKey: string;
-		promise: Promise<{ userId?: string; error?: boolean }>;
-	} | null = null;
-
-	public static getCachedUserId(): string | null {
-		const apiKey = SETTINGS.INFRANODUS_API_KEY;
-		return apiKey && InfraNodus.userIdCache?.apiKey === apiKey
-			? InfraNodus.userIdCache.userId
-			: null;
-	}
-
-	public static async getUserId(params: {
-		headerToken: string;
-	}): Promise<{ userId?: string; error?: boolean }> {
-		const apiKey = params.headerToken;
-
-		if (InfraNodus.userIdCache?.apiKey === apiKey) {
-			return { userId: InfraNodus.userIdCache.userId };
-		}
-		if (InfraNodus.userIdInFlight?.apiKey === apiKey) {
-			return InfraNodus.userIdInFlight.promise;
-		}
-
-		const promise = (async () => {
-			try {
-				const postResult = await this.genericPost(
-					"api/v1/userId",
-					{
-						headerToken: apiKey,
-					},
-					{ credentials: "include" }
-				);
-
-				const userId = postResult.data.userId;
-				if (userId) InfraNodus.userIdCache = { apiKey, userId };
-
-				return { userId };
-			} catch (err) {
-				console.error(
-					"Error when getting the user id from InfraNodus",
-					err
-				);
-				return { error: true };
-			} finally {
-				if (InfraNodus.userIdInFlight?.apiKey === apiKey)
-					InfraNodus.userIdInFlight = null;
-			}
-		})();
-
-		InfraNodus.userIdInFlight = { apiKey, promise };
-		return promise;
 	}
 }
 

@@ -42,6 +42,7 @@ import { focusOrOpenGraphTab } from "./graph_view/lib/openGraphNewTab";
 export const LEAF_VIEW_BUTTON_CLASS = "infranodus-leaf-view-button";
 
 import { extractObsidianSearchResults } from "./utils/searchResults";
+import { setAiApp } from "./ai/client";
 
 export default class InfraNodusPlugin extends Plugin {
 	settings: PluginSettings = SETTINGS;
@@ -100,6 +101,7 @@ export default class InfraNodusPlugin extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		setAiApp(this.app);
 
 		this.addSettingTab(new InfraNodusSettingTab(this.app, this));
 		document.addEventListener(
@@ -827,7 +829,7 @@ export default class InfraNodusPlugin extends Plugin {
 		contentString?: string;
 		sourcePath?: string;
 	}) {
-		new Notice("Generating InfraNodus Graph...");
+		new Notice("Building graph...");
 		const currentPlatform =
 			Platform.isMobileApp || Platform.isMobile ? "mobile" : "desktop";
 

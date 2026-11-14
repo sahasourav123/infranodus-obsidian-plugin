@@ -1,4 +1,9 @@
-import { Platform } from "obsidian";
+import {
+	AiProvider,
+	AiRoutes,
+	DEFAULT_PROVIDERS,
+	DEFAULT_ROUTES,
+} from "src/ai/types";
 
 type GraphAndStatementProcessingType =
 	| "[[Wiki Links]] and Concepts"
@@ -7,8 +12,16 @@ type GraphAndStatementProcessingType =
 	| "Concepts only";
 
 interface PluginSettings {
-	INFRANODUS_API_KEY: string;
-	AI_MODEL: string;
+	// AI providers (local servers, API keys, subscription CLIs) and routing
+	AI_PROVIDERS: AiProvider[];
+	AI_ROUTES: AiRoutes;
+	AI_RESPONSE_LANGUAGE: string;
+	AI_MAX_CONTEXT_CHARS: number;
+	AI_NAME_TOPICS: "yes" | "no";
+	// Local graph engine
+	MAX_GRAPH_NODES: number;
+	// Where "save to note" writes AI output and graph reports
+	SAVE_FOLDER: string;
 	SINGLE_PAGE_GRAPH_PROCESSING: GraphAndStatementProcessingType;
 	MULTI_PAGE_GRAPH_PROCESSING: GraphAndStatementProcessingType;
 	COLOR_SCHEME: "auto" | "light" | "dark";
@@ -27,25 +40,24 @@ interface PluginSettings {
 	USE_OWN_UNLINKED_SEARCH: "no" | "yes";
 	RELOADING_GRAPH: "automatic" | "manual" | "into reading";
 	ADD_LINKS: "End of statement" | "Lemmatization" | "Only exact words";
-	EXPORT_TYPE: "manual" | "auto";
-	EXPORT_GRAPH: string;
-	CONTEXT_NAME: string;
 	WHEN_USING_LOCATE: "Do not force to Edit Mode" | "Force to Edit Mode";
 	// RELOAD_WHEN_TO_READING: boolean;
 
 	MOBILE_OPEN_GRAPH_IN: "Side view" | "New tab";
-	INFRANODUS_API_URL: string;
-	INFRANODUS_GRAPH_URL: string;
 }
 
-interface PluginInternalSettings {
-	INFRANODUS_API_URL: string;
-	INFRANODUS_GRAPH_URL: string;
-}
+// Kept for import compatibility; there are no remote endpoints any more
+// eslint-disable-next-line @typescript-eslint/no-empty-interface
+interface PluginInternalSettings {}
 
 const SETTINGS: PluginSettings = {
-	INFRANODUS_API_KEY: "",
-	AI_MODEL: "gpt-5.4",
+	AI_PROVIDERS: DEFAULT_PROVIDERS.map((p) => ({ ...p })),
+	AI_ROUTES: { ...DEFAULT_ROUTES },
+	AI_RESPONSE_LANGUAGE: "",
+	AI_MAX_CONTEXT_CHARS: 40000,
+	AI_NAME_TOPICS: "yes",
+	MAX_GRAPH_NODES: 300,
+	SAVE_FOLDER: "",
 	SINGLE_PAGE_GRAPH_PROCESSING: "[[Wiki Links]] and Concepts",
 	MULTI_PAGE_GRAPH_PROCESSING: "[[Wiki Links]] and Concepts",
 	COLOR_SCHEME: "auto",
@@ -56,22 +68,14 @@ const SETTINGS: PluginSettings = {
 	DEFAULT_GRAPH_MODE: "graph",
 	RELOADING_GRAPH: "manual",
 	ADD_LINKS: "End of statement",
-	EXPORT_TYPE: "manual",
-	EXPORT_GRAPH: "from_obsidian_*",
-	CONTEXT_NAME: "from_obsidian_ai",
 	WHEN_USING_LOCATE: "Do not force to Edit Mode",
 	// RELOAD_WHEN_TO_READING: true,
 
 	// Mobile Only
 	MOBILE_OPEN_GRAPH_IN: "New tab",
-	INFRANODUS_API_URL: "https://infranodus.com",
-	INFRANODUS_GRAPH_URL: "https://graph.infranodus.com",
 };
 
-const INTERNAL_SETTINGS: PluginInternalSettings = {
-	INFRANODUS_API_URL: "https://infranodus.com",
-	INFRANODUS_GRAPH_URL: "https://graph.infranodus.com",
-};
+const INTERNAL_SETTINGS: PluginInternalSettings = {};
 
 export { INTERNAL_SETTINGS, SETTINGS };
 export type {

@@ -3,8 +3,8 @@ import { IconButton } from "src/components/IconButton";
 import { useEffect, useRef, useState } from "react";
 import { saveSettings } from "../lib/saveSettings";
 import { INTERNAL_SETTINGS, SETTINGS } from "src/settings";
-import { InfraNodusSettingTab } from "src/settings/settingsTab";
-import { InfraNodus } from "src/infranodus";
+import { getProviders } from "src/ai/client";
+import { DEFAULT_ROUTES } from "src/ai/types";
 import { SettingsTextField } from "./settingsOverlay/SettingsTextField";
 import { SettingsDropdownField } from "./settingsOverlay/SettingsDropdownField";
 import { SettingsToggleField } from "./settingsOverlay/SettingsToggleField";
@@ -12,7 +12,8 @@ import * as React from "react";
 import { Notice, Platform } from "obsidian";
 import { PluginGraphContext } from "../types";
 
-const AI_MODELS_FALLBACK = ["gpt-5.4", "gpt-5.4-mini"];
+const providerOptions = () =>
+	getProviders().map((p) => ({ value: p.id, label: p.name }));
 
 interface SettingsFieldType {
 	name: string;
@@ -55,23 +56,35 @@ const GraphViewOverlaySettings = (params: {
 	const [savingSettings, setSavingSettings] = useState(false);
 	const [settingsFields, setSettingsFields] = useState<SettingsFieldType[]>([
 		{
-			name: "API Key",
-			key: "INFRANODUS_API_KEY",
-			link: `${SETTINGS.INFRANODUS_API_URL}/subscription`,
-			description: "Get your API key from InfraNodus > Subscription",
-			value: "",
-			type: "text",
-		},
-		{
-			name: "AI Model",
-			key: "AI_MODEL",
-			description: "Choose the AI model to use.",
+			name: "Insights AI",
+			key: "ROUTE:insights",
+			description: "Summaries, questions, ideas. Add providers in the plugin settings.",
 			value: "",
 			type: "dropdown",
-			dropdownOptions: AI_MODELS_FALLBACK.map((m) => ({
-				value: m,
-				label: m,
-			})),
+			dropdownOptions: providerOptions(),
+		},
+		{
+			name: "Chat AI",
+			key: "ROUTE:chat",
+			description: "Chat with your notes.",
+			value: "",
+			type: "dropdown",
+			dropdownOptions: providerOptions(),
+		},
+		{
+			name: "Topic names AI",
+			key: "ROUTE:topics",
+			description: "Names the topical clusters.",
+			value: "",
+			type: "dropdown",
+			dropdownOptions: providerOptions(),
+		},
+		{
+			name: "Max concepts in graph",
+			key: "MAX_GRAPH_NODES",
+			description: "Most connected concepts kept (100–1000).",
+			value: "",
+			type: "text",
 		},
 		params.isFolder
 			? {
@@ -219,39 +232,14 @@ const GraphViewOverlaySettings = (params: {
 				{ value: "topics", label: "Topics" },
 				{ value: "concepts", label: "Concepts" },
 				{ value: "gaps", label: "Gaps" },
-				{ value: "trends", label: "Trends" },
 			],
 		},
 		{
-			name: "InfraNodus Data Export",
-			key: "EXPORT_TYPE",
-			description: "How should we export your data",
-			value: "",
-			type: "dropdown",
-			dropdownOptions: [
-				{ value: "manual", label: "Copy and paste (manual)" },
-				{ value: "auto", label: "Automatic" },
-			],
-			note: "More control with manual export, but doesn't work for big files.",
-			noteTriggers: ["manual", "auto"],
-		},
-		{
-			name: "Export Graph Name Prefix",
-			key: "EXPORT_GRAPH",
-			description:
-				"What graph in InfraNodus should we export your text data to",
+			name: "Save notes to folder",
+			key: "SAVE_FOLDER",
+			description: "Where AI output and graph reports are saved (blank = vault root).",
 			value: "",
 			type: "text",
-			note: "This is the name of the graph where text data are saved. Add * for the page name, ** for the vault name.",
-		},
-		{
-			name: "Save AI Insights to Graph Name",
-			key: "CONTEXT_NAME",
-			description:
-				"What graph in InfraNodus should we export your AI insights to",
-			value: "",
-			type: "text",
-			note: "This is the name of the graph where AI insights are saved. Add * for the page name, ** for the vault name.",
 		},
 		{
 			name: "When Using Locate",
@@ -297,39 +285,42 @@ const GraphViewOverlaySettings = (params: {
 			});
 		}
 
+		const routes: any = { ...DEFAULT_ROUTES, ...(SETTINGS.AI_ROUTES || {}) };
 		for (const field of settingsFields) {
+			if (field.key?.startsWith("ROUTE:")) {
+				field.value = routes[field.key.slice(6)] || "";
+				continue;
+			}
 			// @ts-ignore:next-line
 			const settingsVal = SETTINGS[field.key] as any;
-			if (settingsVal) field.value = settingsVal;
+			if (settingsVal !== undefined && settingsVal !== null)
+				field.value = String(settingsVal);
 		}
 
 		setSettingsFields([...settingsFields]);
-
-		InfraNodus.fetchAiModels().then((models) => {
-			setSettingsFields((prev) =>
-				prev.map((field) =>
-					field.key === "AI_MODEL"
-						? {
-								...field,
-								dropdownOptions: models.map((m) => ({
-									value: m,
-									label: m,
-								})),
-						  }
-						: field
-				)
-			);
-		});
 	}, []);
 
 	async function saveLocalSettings() {
 		if (savingSettings) return;
 		setSavingSettings(true);
 		try {
-			const settings: { [key: string]: string } = {};
+			const settings: { [key: string]: any } = {};
+			const routes: any = {
+				...DEFAULT_ROUTES,
+				...(SETTINGS.AI_ROUTES || {}),
+			};
 			for (const field of settingsFields) {
 				if (!field.key) continue;
+				if (field.key.startsWith("ROUTE:")) {
+					routes[field.key.slice(6)] = field.value;
+					continue;
+				}
 				settings[field.key] = field.value;
+			}
+			settings.AI_ROUTES = routes;
+			if ("MAX_GRAPH_NODES" in settings) {
+				const n = parseInt(settings.MAX_GRAPH_NODES, 10);
+				settings.MAX_GRAPH_NODES = Math.max(30, Math.min(2000, isNaN(n) ? 300 : n));
 			}
 
 			await saveSettings(settings);
@@ -371,7 +362,7 @@ const GraphViewOverlaySettings = (params: {
 		>
 			<div className="flex flex-row justify-between">
 				<div className="font-bold font-lg text-lg">
-					InfraNodus Plugin Settings
+					Graph AI Settings
 				</div>
 				<div className="cursor-pointer" onClick={params.closeSettings}>
 					<XCircleIcon size={16} />

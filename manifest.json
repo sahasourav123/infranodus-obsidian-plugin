@@ -1,9 +1,9 @@
 {
-	"id": "infranodus-graph-view",
-	"name": "InfraNodus AI Graph View",
-	"version": "0.10.0",
-	"minAppVersion": "0.15.0",
-	"description": "Interactive 3D graph view: text analysis, topic modeling, gap detection, and AI.",
-	"author": "Nodus Labs",
+	"id": "infranodus-local-graph",
+	"name": "InfraNodus Local AI Graph",
+	"version": "0.10.0-local.1",
+	"minAppVersion": "1.11.4",
+	"description": "Text network graph of your notes with topics, gaps and AI insights. Runs locally; AI via your own local LLM, API keys or subscription CLIs.",
+	"author": "sahasourav123 (fork of the Nodus Labs InfraNodus plugin)",
 	"isDesktopOnly": false
 }
