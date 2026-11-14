@@ -1,5 +1,3 @@
-import { error } from "console";
-import { INTERNAL_SETTINGS, SETTINGS } from "src/settings";
 import { PluginGraphContext } from "../types";
 
 type PossibleError =
@@ -38,93 +36,6 @@ const ErrorHandler = (params: {
 								addSpacesAround={true}
 							/>
 							to also process text in the documents.
-						</p>
-					</>
-				)}
-				{params.error === "invalid-api-key" && (
-					<>
-						<h2>Please, add your InfraNodus API key</h2>
-						<p>
-							Cannot connect to your InfraNodus account. This may
-							be because your API key has expired or is incorrect.
-							Please, go to
-							<ActionLink
-								text="infranodus subscriptions"
-								href={
-									SETTINGS.INFRANODUS_API_URL +
-									"/subscription"
-								}
-								addSpacesAround={true}
-							/>{" "}
-							page to get your updated API key and add it to the
-							<ActionLink
-								text="plugin settings"
-								action={() => ctx.setShowingSettings(true)}
-								addSpaceLeft={true}
-							/>
-							. If you don't have an account, you can create a
-							free trial one on any tier and use this plugin
-							straight away.
-						</p>
-					</>
-				)}
-				{params.error === "api-key-free-exceeded" && (
-					<>
-						<h2>
-							You've used all your free InfraNodus trial quota.
-						</h2>
-						<p>
-							Please,{" "}
-							<ActionLink
-								text="sign up"
-								href={
-									SETTINGS.INFRANODUS_API_URL +
-									"/signup?utm_source=obsidian_plugin_rate_limit"
-								}
-								addSpacesAround={true}
-							/>{" "}
-							or log in to generate{" "}
-							<ActionLink
-								text="an InfraNodus API key"
-								href={
-									SETTINGS.INFRANODUS_API_URL +
-									"/api-access?utm_source=obsidian_plugin_rate_limit"
-								}
-								addSpacesAround={true}
-							/>{" "}
-							and then add it to your{" "}
-							<ActionLink
-								text="plugin settings"
-								action={() => ctx.setShowingSettings(true)}
-								addSpaceLeft={true}
-							/>
-							{"."}
-						</p>
-					</>
-				)}
-				{params.error === "api-key-paid-exceeded" && (
-					<>
-						<h2>You've used up all your InfraNodus API quota</h2>
-						<p>
-							Please, go to the
-							<ActionLink
-								text="infranodus subscriptions"
-								href={
-									SETTINGS.INFRANODUS_API_URL +
-									"/subscription"
-								}
-								addSpacesAround={true}
-							/>{" "}
-							page to upgrade your plan or
-							<ActionLink
-								text="contact us"
-								href={
-									"https://support.noduslabs.com/hc/en-us/requests/new"
-								}
-								addSpaceLeft={true}
-							/>{" "}
-							if you believe this is an error or would like us to
-							extend your quota.
 						</p>
 					</>
 				)}
@@ -202,34 +113,12 @@ const ErrorHandler = (params: {
 				{params.error === "generic-error" && (
 					<>
 						<h2>Ooops, there was an error...</h2>
-						{params.errorText == "net::ERR_CONNECTION_REFUSED" && (
+						{(params.errorText == "net::ERR_CONNECTION_REFUSED" ||
+							params.errorText == "net::ERR_NAME_NOT_RESOLVED") && (
 							<p>
-								There was a problem connecting to
-								InfraNodus.Com. Please, try again in a minute or
-								contact our{" "}
-								<ActionLink
-									text="support"
-									addSpacesAround={true}
-									href={
-										"https://support.noduslabs.com/hc/en-us/requests/new"
-									}
-								/>
-								and describe what you were trying to do.
-							</p>
-						)}
-						{params.errorText == "net::ERR_NAME_NOT_RESOLVED" && (
-							<p>
-								Could not connect to the InfraNodus API domain.
-								Please, check your connection, try again later,
-								or contact our{" "}
-								<ActionLink
-									text="support"
-									addSpacesAround={true}
-									href={
-										"https://support.noduslabs.com/hc/en-us/requests/new"
-									}
-								/>
-								and describe what you were trying to do.
+								Could not reach the AI provider. Check that your
+								local server (Bionic / LM Studio) is running, or
+								the provider settings.
 							</p>
 						)}
 						{params.errorText != "net::ERR_CONNECTION_REFUSED" &&
@@ -243,13 +132,9 @@ const ErrorHandler = (params: {
 									{isRateLimitError(params.errorText) && (
 										<>
 											<br></br>
-											The connection was refused. This
-											could be due to the rate limit. If
-											you are on a free plan, please,
-											upgrade, and add your API key to the
-											plugin settings. If you are on a
-											paid plan, please, try to reduce the
-											number of requests per minute.
+											The provider reported a rate limit.
+											Wait a minute or route this task to
+											another provider in the settings.
 										</>
 									)}
 								</p>
@@ -280,17 +165,7 @@ const ErrorHandler = (params: {
 								: "An unknown error occured. Please try again later or with another page."}
 						</p>
 						<p>
-							In many cases this can be resolved by generating a
-							fresh
-							<ActionLink
-								text="InfraNodus API key"
-								href={
-									SETTINGS.INFRANODUS_API_URL +
-									"/api-access?utm_source=obsidian_plugin_rate_limit"
-								}
-								addSpacesAround={true}
-							/>{" "}
-							from an active account and then adding it to your{" "}
+							Check that your AI provider is running and reachable in the
 							<ActionLink
 								text="plugin settings"
 								action={() => ctx.setShowingSettings(true)}

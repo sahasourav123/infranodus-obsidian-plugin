@@ -1,3 +1,36 @@
+# InfraNodus Local AI Graph (fork)
+
+This fork runs **without the InfraNodus service**. The text network (concepts, topics, gaps, influence) is computed locally, the graph is drawn locally, and AI calls go only to providers you configure.
+
+**What changed from upstream**
+
+| Upstream | This fork |
+|---|---|
+| Graph built by the InfraNodus API | Local engine (`src/engine/textNetwork.ts`): 4-gram co-occurrence, betweenness centrality, Louvain topics, gap detection, top statements |
+| 3D graph in an iframe from graph.infranodus.com | Local canvas view (`src/graph_view/components/LocalGraph.tsx`) with Topics / Gaps / Concepts panels and an AI action bar |
+| AI through the InfraNodus account (API key) | Your providers (`src/ai/`), routed per task |
+| "Save to InfraNodus" | "Save to note" and a markdown **graph report** in your vault |
+
+**AI providers** (Settings → InfraNodus Local AI Graph → Providers)
+
+- Local OpenAI-compatible servers: **Bionic / LM Studio** (`http://127.0.0.1:1235/v1` or `:1234/v1`), Ollama, LiteLLM, any `/v1/chat/completions` server. Set *Reasoning effort = None* for Qwen3-style thinking models; it is much faster.
+- API keys: **Claude (Anthropic)**, **OpenAI**, **Grok (xAI)**, OpenRouter. Keys are stored in Obsidian's secret storage (system keychain), not in `data.json`.
+- Subscriptions via their official CLIs (desktop only): **ChatGPT** through `codex exec` (Codex CLI signed in with your ChatGPT plan) and **Claude** through `claude -p` (Claude Code signed in with your Claude plan). The prompt goes to the CLI on stdin.
+- Grok subscriptions (SuperGrok / X Premium) have no official API or CLI access; use an xAI API key.
+
+**Task routing**: topic names, insights (summaries, questions, ideas), chat, and semantic search (embeddings, or keyword search with no AI) can each use a different provider.
+
+**Build and install**
+
+```
+npm ci && npm run build
+cp main.js manifest.json styles.css <vault>/.obsidian/plugins/infranodus-local-graph/
+```
+
+The plugin id is `infranodus-local-graph`, so it never collides with (or gets overwritten by) the upstream community plugin.
+
+---
+
 # InfraNodus Advanced Graph View Plugin for Obsidian
 
 <p>&nbsp;</p>

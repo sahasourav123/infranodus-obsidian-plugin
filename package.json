@@ -1,7 +1,7 @@
 {
-	"name": "InfraNodus-Obsidian-Plugin",
+	"name": "infranodus-local-graph",
 	"version": "0.10.0",
-	"description": "Advanced graph view for Obsidian: text analysis, topic modeling, and AI with https://infranodus.com",
+	"description": "Local text network graph for Obsidian with topics, gaps and AI via your own providers",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
@@ -29,9 +29,13 @@
 	"dependencies": {
 		"@primer/octicons-react": "^19.9.0",
 		"@tailwindcss/container-queries": "^0.1.1",
+		"d3-force-3d": "^3.0.6",
 		"dompurify": "^3.1.4",
 		"esbuild-postcss": "^0.0.4",
-		"jwt-decode": "^4.0.0",
+		"force-graph": "^1.47.4",
+		"graphology": "^0.25.4",
+		"graphology-communities-louvain": "^2.0.2",
+		"graphology-metrics": "^2.4.0",
 		"lodash": "^4.17.21",
 		"markdown-to-txt": "^2.0.1",
 		"react": "^18.3.1",

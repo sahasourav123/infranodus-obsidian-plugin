@@ -1,9 +1,7 @@
 import { App, PluginSettingTab, Setting, Platform } from "obsidian";
 import InfraNodusPlugin from "src/main";
-import { InfraNodus } from "src/infranodus";
-import { INTERNAL_SETTINGS, SETTINGS } from ".";
-
-const AI_MODELS_FALLBACK = ["gpt-5.4", "gpt-5.4-mini"];
+import { SETTINGS } from ".";
+import { renderAiSettings } from "./aiSettings";
 
 const currentPlatform =
 	Platform.isMobileApp || Platform.isMobile ? "mobile" : "desktop";
@@ -29,35 +27,45 @@ class InfraNodusSettingTab extends PluginSettingTab {
 		}).bind(this);
 
 		containerEl.empty();
-		new Setting(containerEl)
-			.setName("InfraNodus API key")
-			.setDesc("Get your API key from InfraNodus > Subscription.")
-			.addText((text) => {
-				const key = "INFRANODUS_API_KEY";
-				text.setPlaceholder("Enter key")
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
+		renderAiSettings({
+			containerEl,
+			app: this.app,
+			save: (settings) => this.plugin.saveSettings(settings),
+			refresh: () => this.display(),
+		});
+
+		new Setting(containerEl).setName("Graph").setHeading();
 
 		new Setting(containerEl)
-			.setName("AI model")
-			.setDesc("Choose the AI model to use.")
-			.addDropdown((dropdown) => {
-				const key = "AI_MODEL";
-				const populate = (models: string[]) => {
-					dropdown.selectEl.empty();
-					const current = SETTINGS[key];
-					const list =
-						current && !models.includes(current)
-							? [current, ...models]
-							: models;
-					list.forEach((m) => dropdown.addOption(m, m));
-					dropdown.setValue(current);
-				};
-				populate(AI_MODELS_FALLBACK);
-				dropdown.onChange(async (value) => onChange(key, value));
-				InfraNodus.fetchAiModels().then(populate);
-			});
+			.setName("Max concepts in graph")
+			.setDesc(
+				"The most connected concepts are kept. Higher = more detail, slower layout."
+			)
+			.addText((text) =>
+				text
+					.setValue(String(SETTINGS.MAX_GRAPH_NODES || 300))
+					.onChange(async (value) => {
+						const n = parseInt(value, 10);
+						if (!isNaN(n) && n >= 30)
+							await this.plugin.saveSettings({
+								MAX_GRAPH_NODES: Math.min(n, 2000),
+							});
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Save notes to folder")
+			.setDesc(
+				"Where AI output and graph reports are saved. Blank = vault root."
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("e.g. 00 Inbox")
+					.setValue(SETTINGS.SAVE_FOLDER || "")
+					.onChange(async (value) =>
+						this.plugin.saveSettings({ SAVE_FOLDER: value.trim() })
+					)
+			);
 
 		new Setting(containerEl)
 			.setName("Link mentions to")
@@ -213,7 +221,6 @@ class InfraNodusSettingTab extends PluginSettingTab {
 					.addOption("topics", "Topics")
 					.addOption("concepts", "Concepts")
 					.addOption("gaps", "Gaps")
-					.addOption("trends", "Trends")
 					.setValue(SETTINGS[key])
 					.onChange(async (value) => onChange(key, value));
 			});
@@ -230,44 +237,6 @@ class InfraNodusSettingTab extends PluginSettingTab {
 		// 			.setValue(SETTINGS[key])
 		// 			.onChange(async (value) => onChange(key, value));
 		// 	});
-
-		new Setting(containerEl)
-			.setName("Export type")
-			.setDesc(
-				"Applies to AI insight clips. Full graph / analyzed text exports always save directly via the API (works with big files)."
-			)
-			.addDropdown((dropdown) => {
-				const key = "EXPORT_TYPE";
-				dropdown
-					.addOption("manual", "Copy and paste (manual)")
-					.addOption("auto", "Automatic")
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
-
-		new Setting(containerEl)
-			.setName("Export to graph name")
-			.setDesc(
-				"Name of the graph to export data to, add * for page name, ** for vault name."
-			)
-			.addText((text) => {
-				const key = "EXPORT_GRAPH";
-				text.setPlaceholder("Enter context name")
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
-
-		new Setting(containerEl)
-			.setName("Export AI insights to graph name")
-			.setDesc(
-				"Name of the graph where AI insights are saved, add * for page name, ** for vault name."
-			)
-			.addText((text) => {
-				const key = "CONTEXT_NAME";
-				text.setPlaceholder("Enter context name")
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
 
 		new Setting(containerEl)
 			.setName("When using locate")
@@ -310,46 +279,6 @@ class InfraNodusSettingTab extends PluginSettingTab {
 				});
 		}
 
-		new Setting(containerEl)
-			.setName("InfraNodus API URL")
-			.setDesc(
-				"Developer mode. InfraNodus.Com is a default value, do not change."
-			)
-			.addDropdown((dropdown) => {
-				const key = "INFRANODUS_API_URL";
-				dropdown
-					.addOption(
-						"https://infranodus.com",
-						"https://infranodus.com"
-					)
-					.addOption("http://localhost:3000", "http://localhost:3000")
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
-
-		new Setting(containerEl)
-			.setName("InfraNodus Graph URL")
-			.setDesc(
-				"Developer mode. The default value is graph.infranodus.com, do not change."
-			)
-			.addDropdown((dropdown) => {
-				const key = "INFRANODUS_GRAPH_URL";
-				dropdown
-					.addOption(
-						"https://graph.infranodus.com",
-						"https://graph.infranodus.com"
-					)
-					.addOption(
-						"https://localhost:5173",
-						"https://localhost:5173"
-					)
-					.addOption(
-						"https://localhost:4173",
-						"https://localhost:4173"
-					)
-					.setValue(SETTINGS[key])
-					.onChange(async (value) => onChange(key, value));
-			});
 	}
 }
 

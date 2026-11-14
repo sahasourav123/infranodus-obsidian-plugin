@@ -34,7 +34,8 @@ import {
 } from "./lib/jumpToStatement";
 import { INTERNAL_SETTINGS, SETTINGS } from "src/settings";
 import { generateTextForContext } from "./lib/generateTextForContext";
-import { exportGraphToInfraNodus } from "./lib/exportGraphToInfraNodus";
+import { saveGraphReport } from "./lib/saveToNote";
+import { LocalGraph, GraphAction } from "./components/LocalGraph";
 import { unObserveElementAttributes } from "src/utils/observer";
 import { GraphViewOverlaySettings } from "./components/GraphViewOverlaySettings";
 import { InfoTooltip } from "src/components/InfoTootip";
@@ -45,7 +46,7 @@ import {
 	PlayIcon,
 	RepoPullIcon,
 	CheckIcon,
-	CrossReferenceIcon,
+	NoteIcon,
 } from "@primer/octicons-react";
 import {
 	handleGraphDataError,
@@ -58,23 +59,7 @@ import { TFile } from "obsidian";
 
 import { TopicsObject } from "src/types/general";
 
-import { jwtDecode } from "jwt-decode";
-
-
 import { GraphPanel } from "./types";
-
-enum EventTypes {
-	LOAD = "LOAD_JSON",
-	REMOVED_NODES = "UPDATE_REMOVED_NODES",
-	SELECTED_NODES = "UPDATE_SELECTED_NODES",
-	GROUPS = "UPDATE_GROUPS",
-	GROUPS_PRESELECT = "GROUPS_PRESELECT",
-	GAPS = "GAPS",
-	READY = "READY",
-	RECALCULATION = "RECALCULATION",
-	TOPICS_UPDATE = "TOPICS_UPDATE",
-	EXTERNAL_ACTION = "EXTERNAL_ACTION",
-}
 
 const GraphView = (params: {
 	initialData?: GraphInitialData;
@@ -82,9 +67,6 @@ const GraphView = (params: {
 }) => {
 	// console.log("initialData", params.initialData);
 	// console.log("graphContext", params.graphContext);
-
-	const GRAPH_BASE_URL = SETTINGS.INFRANODUS_GRAPH_URL;
-	const GRAPH_URL = `${GRAPH_BASE_URL}?iframe=true&action=true&app=obsidian`;
 
 	const { filePath, app, contentString, sourcePath } = params.graphContext;
 	const cleanFilePath =
@@ -98,10 +80,6 @@ const GraphView = (params: {
 		SETTINGS.USE_OWN_UNLINKED_SEARCH
 	);
 
-	const graphLink = SETTINGS.DEFAULT_GRAPH_MODE
-		? `${GRAPH_URL}&mode=${SETTINGS.DEFAULT_GRAPH_MODE}`
-		: GRAPH_URL;
-
 	const obsidianColorSchemeRef = useRef<"dark" | "light">("light");
 
 	const [graphData, setGraphData] = useState<AnswerInfraNodusTopics>();
@@ -112,7 +90,8 @@ const GraphView = (params: {
 	const [connectedWords, setConnectedWords] = useState<string[]>([]);
 	const [wordsToHide, setWordsToHide] = useState<string[]>([]);
 	const [isHidingWords, setIsHidingWords] = useState(false);
-	const [gapShown, setGapShown] = useState(false);
+	const [gapShown, setGapShown] = useState<any>(false);
+	const [topicNames, setTopicNames] = useState<Record<string, string>>({});
 	const [topicsFiltered, setTopicsFiltered] = useState<any[]>([]);
 	const [adviceMode, setAdviceMode] = useState<AdviceMode>("none");
 	const [overlayShowMode, setOverlayShowMode] = useState<
@@ -120,7 +99,7 @@ const GraphView = (params: {
 	>(null);
 	// const [textToShow, setTextToShow] = useState("ai generating...");
 
-	const [showIframe, setShowIframe] = useState(true);
+	const showIframe = true; // local renderer is always mounted
 	const [isLoadingIframe, setIsLoadingIframe] = useState(false);
 	const [error, setError] = useState<PossibleError>();
 	const [errorText, setErrorText] = useState("");
@@ -131,12 +110,6 @@ const GraphView = (params: {
 	const contentRef = useRef<string>();
 	const pageNamesRef = useRef<string[][]>([]);
 	const statementsRef = useRef<string[]>([]);
-	const loadedIframeRef = useRef(false);
-	const iframIsReadyRef = useRef(false);
-	// Last payloads sent to the iframe, so the graph can be restored if the
-	// iframe reboots (a READY arriving after the data was already sent)
-	const lastLoadPayloadRef = useRef<any>(null);
-	const lastAiTopicsRef = useRef<any>(null);
 	const filteredStatementsRef = useRef<StatementsObject[]>([]);
 	const extractedGraphDataRef = useRef<InfraNodusExtractedGraphData>();
 	const lastSelectedWordRef = useRef<string | null>(
@@ -153,50 +126,7 @@ const GraphView = (params: {
 		SETTINGS.DEFAULT_GRAPH_MODE as GraphPanel
 	);
 
-	const auth_token = SETTINGS.INFRANODUS_API_KEY;
-
-	// Seeding from the cache keeps the iframe src stable from the first
-	// render — an src change mid-load reboots the graph viewer
-	const cachedUserId = InfraNodus.getCachedUserId();
-
-	const [currentUser, setCurrentUser] = useState<string>(cachedUserId ?? "");
-
-	const [iframeGraphUser, setIframeGraphUser] = useState<string>(
-		cachedUserId ? `&user=${cachedUserId}` : ""
-	);
-
-	useEffect(() => {
-		const fetchUserId = async () => {
-			if (currentUser) return;
-			if (auth_token) {
-				try {
-					const userResponse = await InfraNodus.getUserId({
-						headerToken: auth_token,
-					});
-					console.log("userResponse", userResponse);
-
-					// Assuming userResponse.data contains the userId
-					if (userResponse?.userId) {
-						setCurrentUser(userResponse.userId);
-					} else {
-						// Fallback to decoding JWT if needed
-						const decoded: any = jwtDecode(auth_token);
-						setCurrentUser(decoded?.user?.id || "");
-					}
-				} catch (error) {
-					console.error("Error getting user ID:", error);
-					setCurrentUser("");
-				}
-			}
-		};
-		fetchUserId();
-	}, []);
-
-	useEffect(() => {
-		if (currentUser) {
-			setIframeGraphUser(`&user=${currentUser}`);
-		}
-	}, [currentUser]);
+	const currentUser = "";
 
 	// For "context"
 	// const [currentContextShown, setCurrentContextShown] = useState(0);
@@ -205,11 +135,26 @@ const GraphView = (params: {
 	const statementToJumpToRef = useRef<Record<string, number>>({});
 	const previousStatementToJumpToRef = useRef<string>("");
 
-	const graph_iframe: React.MutableRefObject<HTMLIFrameElement> =
-		useRef() as React.MutableRefObject<HTMLIFrameElement>;
-
 	const graph_top_text: React.MutableRefObject<HTMLIFrameElement> =
 		useRef() as React.MutableRefObject<HTMLIFrameElement>;
+
+	// Adjust filteredStatements
+	useEffect(() => {
+		const allStatements =
+			extractedGraphDataRef.current?.all_statements_with_top;
+		const filteredStatements = filterStatements({
+			statements: allStatements ?? [],
+			wordsToSearch,
+			wordsToHide,
+			topicsFiltered,
+			connectedWords,
+		});
+
+		filteredStatementsRef.current =
+			filteredStatements && filteredStatements.length > 0
+				? filteredStatements
+				: [];
+	}, [wordsToHide, wordsToSearch, topicsFiltered, graphData, connectedWords]);
 
 	// Separate state, for handling message from the iframe
 	const stateForMessagesRef: GraphViewStateRef = useRef(undefined as any);
@@ -298,24 +243,6 @@ const GraphView = (params: {
 			observer.disconnect();
 		};
 	}, []);
-
-	// Adjust filteredStatements
-	useEffect(() => {
-		const allStatements =
-			extractedGraphDataRef.current?.all_statements_with_top;
-		const filteredStatements = filterStatements({
-			statements: allStatements ?? [],
-			wordsToSearch,
-			wordsToHide,
-			topicsFiltered,
-			connectedWords,
-		});
-
-		filteredStatementsRef.current =
-			filteredStatements && filteredStatements.length > 0
-				? filteredStatements
-				: [];
-	}, [wordsToHide, wordsToSearch, topicsFiltered, graphData, connectedWords]);
 
 	function diff(a: Date) {
 		return (new Date().valueOf() - a.valueOf()) / 1000;
@@ -475,117 +402,43 @@ const GraphView = (params: {
 				})
 			);
 			// console.log("Obtained names for the Topics", topicNames);
-			// console.log("[time] all graph data", diff(start2));
-			if (loadingState != "complete") setLoadingState("waiting-iframe");
+			// Cluster ids can change after a rebuild: drop the old AI names
+			setTopicNames({});
 
-			const start3 = new Date();
-
-			if (!loadedIframeRef.current) {
-				const iframeReadyDeadline = Date.now() + 20000;
-				while (!iframIsReadyRef.current) {
-					if (Date.now() > iframeReadyDeadline) {
-						throw new Error(
-							"Could not load the InfraNodus graph viewer. Please check your connection and try reloading the graph."
-						);
-					}
-					await new Promise((resolve) => setTimeout(resolve, 50));
-				}
-				// sendDataToIframe("LOAD", {
-				// 	infraNodusAnswer: graphData,
-				// 	topicNames,
-				// });
-				const loadPayload = {
-					entriesAndGraphOfContext:
-						graphData?.entriesAndGraphOfContext,
-					topicNames,
-				};
-				lastLoadPayloadRef.current = loadPayload;
-				let loadSent = sendDataToIframe("LOAD_JSON", loadPayload);
-				for (let attempt = 0; attempt < 10 && !loadSent; attempt++) {
-					await new Promise((resolve) => setTimeout(resolve, 200));
-					loadSent = sendDataToIframe("LOAD_JSON", loadPayload);
-				}
-				loadedIframeRef.current = true;
-				// console.log("[time] waiting load and sending", diff(start3));
-
-				await new Promise((resolve) => setTimeout(resolve, 250));
-				// console.log("INITIAL DATA", params.initialData);
-				if (wordsToSearch.length > 0) {
-					sendDataToIframe(EventTypes.SELECTED_NODES, wordsToSearch);
-				}
-				if (wordsToHide.length > 0) {
-					sendDataToIframe(EventTypes.REMOVED_NODES, wordsToHide);
-				}
-			} else {
-				// setShowIframe(false);
-				// console.log("Hide iframe, reloading...");
-				// iframIsReadyRef.current = false;
-				// await new Promise((resolve) => setTimeout(resolve, 250));
-				// setShowIframe(true);
-
-				// while (!iframIsReadyRef.current) {
-				// 	await new Promise((resolve) => setTimeout(resolve, 50));
-				// }
-
-				// console.log(
-				// 	"Reloading Iframe with",
-				// 	wordsToSearch,
-				// 	wordsToHide
-				// );
-
-				lastLoadPayloadRef.current = {
-					...(lastLoadPayloadRef.current || {}),
-					entriesAndGraphOfContext:
-						graphData?.entriesAndGraphOfContext,
-				};
-				sendDataToIframe("RECALCULATION", {
-					entriesAndGraphOfContext:
-						graphData?.entriesAndGraphOfContext,
-				});
-				// sendDataToIframe("LOAD", {
-				// 	infraNodusAnswer: graphData,
-				// 	topicNames,
-				// });
-				// sendDataToIframe("LOAD_JSON", {
-				// 	entriesAndGraphOfContext:
-				// 		graphData?.entriesAndGraphOfContext,
-				// 	topicNames,
-				// });
-				// await new Promise((resolve) => setTimeout(resolve, 250));
-				// sendDataToIframe(EventTypes.SELECTED_NODES, wordsToSearch);
-				// sendDataToIframe(EventTypes.REMOVED_NODES, wordsToHide);
-				// new Notice("Graph reloaded");
-			}
 			if (loadingState != "complete") setIsLoadingIframe(false);
 			setLoadingState("complete");
 			new Notice("Graph loaded");
 
-			// Try to generate ai topic names
-			try {
-				const aiTopics = await InfraNodus.generateAiNamesForTopics({
-					graph_data: graphData,
-					top_clusters: extractedGraphDataRef.current?.top_clusters,
-					language: "USER",
-					top_statements:
-						extractedGraphDataRef.current?.top_statements,
-				});
-				lastAiTopicsRef.current = aiTopics;
-				sendDataToIframe(EventTypes.TOPICS_UPDATE, aiTopics);
-				// console.log("AI Topics", aiTopics);
-
-				// Match ai topics to extracted data
-				for (const aiTopic of aiTopics) {
-					const topic =
-						extractedGraphDataRef.current?.top_clusters.find(
-							(topic: any) => topic.community == aiTopic.id
-						);
-					if (topic) {
-						topic.aiName = aiTopic.name;
-						topic.aiDescription = aiTopic.description;
+			// Name the topics with the AI provider configured for "Topic names"
+			if (SETTINGS.AI_NAME_TOPICS !== "no") {
+				try {
+					const aiTopics = await InfraNodus.generateAiNamesForTopics({
+						graph_data: graphData,
+						top_clusters: extractedGraphDataRef.current?.top_clusters,
+						language: "USER",
+						top_statements:
+							extractedGraphDataRef.current?.top_statements,
+					});
+					const names: Record<string, string> = {};
+					for (const aiTopic of aiTopics) {
+						names[aiTopic.id] = aiTopic.name;
+						const topic: any =
+							extractedGraphDataRef.current?.top_clusters.find(
+								(topic: any) => topic.community == aiTopic.id
+							);
+						if (topic) {
+							topic.aiName = aiTopic.name;
+							topic.aiDescription = aiTopic.description;
+						}
 					}
+					setTopicNames(names);
+				} catch (err) {
+					console.log("Error generating AI topics", err.message, err);
+					new Notice(
+						`Topic names: ${err.message || err}`.slice(0, 300),
+						8000
+					);
 				}
-			} catch (err) {
-				console.log("Error generating AI topics", err.message, err);
 			}
 		}
 
@@ -633,403 +486,162 @@ const GraphView = (params: {
 		}
 	}
 
-	// Handle messages from the iframe
-	useEffect(() => {
-		const onMessage = async (message: any) => {
-			if (message.source !== graph_iframe.current?.contentWindow) return;
+	// ---------------------------------------------------------------
+	// Graph interactions (formerly messages from the InfraNodus iframe).
+	// Handlers read the latest state from stateForMessagesRef so they are
+	// safe to call from deferred callbacks.
 
-			const type = message.data.type;
-			let payload = message.data.payload;
-			// console.log(
-			// 	"InfraNodus received message from iframe",
-			// 	type,
-			// 	payload
-			// );
+	async function handleSelectNodes(payload: string[], connected: string[]) {
+		const { wordsToSearch, wordsToHide } = stateForMessagesRef.current;
+		if (!payload) payload = [];
+		setIsSearchingWords(payload.length > 0);
+		setCurrentGraphPanel(payload.length > 0 ? "concepts" : "graph");
+		if (arraysAreEqual(wordsToSearch, payload)) return;
 
-			const { wordsToSearch, wordsToHide, topicsFiltered, graphData } =
-				stateForMessagesRef.current;
-
-			switch (type) {
-				case EventTypes.READY:
-					iframIsReadyRef.current = true;
-					// Self-healing: a READY arriving after the graph data was
-					// already sent means the iframe rebooted (or missed the
-					// payload) — re-send it, or it stays blank until a manual
-					// reload
-					if (loadedIframeRef.current && lastLoadPayloadRef.current) {
-						console.log(
-							"InfraNodus: iframe issued READY after load — re-sending graph data"
-						);
-						sendDataToIframe(
-							"LOAD_JSON",
-							lastLoadPayloadRef.current
-						);
-						await new Promise((resolve) =>
-							setTimeout(resolve, 250)
-						);
-						if (wordsToSearch.length > 0)
-							sendDataToIframe(
-								EventTypes.SELECTED_NODES,
-								wordsToSearch
-							);
-						if (wordsToHide.length > 0)
-							sendDataToIframe(
-								EventTypes.REMOVED_NODES,
-								wordsToHide
-							);
-						if (lastAiTopicsRef.current)
-							sendDataToIframe(
-								EventTypes.TOPICS_UPDATE,
-								lastAiTopicsRef.current
-							);
-					}
-					break;
-				case EventTypes.SELECTED_NODES:
-					if (!payload) payload = [];
-
-					setIsSearchingWords(payload.length > 0);
-					setCurrentGraphPanel("concepts");
-					if (!arraysAreEqual(wordsToSearch, payload)) {
-						const newWordsToSearch: string[] = Array.from(
-							new Set(payload)
-						);
-						const wordsUnselected = wordsToSearch.filter(
-							(word: string) => {
-								if (newWordsToSearch.includes(word))
-									return false;
-								if (lastSelectedWordRef.current === word) {
-									lastSelectedWordRef.current =
-										newWordsToSearch[0];
-								}
-								return true;
-							}
-						);
-
-						const _connectedWords =
-							message.data.connectedNodes ?? [];
-
-						try {
-							const allStatements =
-								extractedGraphDataRef.current
-									?.all_statements_with_top;
-							const filteredStatements = filterStatements({
-								statements: allStatements ?? [],
-								wordsToSearch: wordsUnselected,
-								wordsToHide,
-								connectedWords: _connectedWords,
-							}).map((statement) => statement.content ?? "");
-
-							const elements = await unhighlightStatements(
-								app,
-								filteredStatements
-							);
-
-							unObserveElementAttributes(elements);
-
-							elements.forEach((el) =>
-								el.classList.remove(
-									"infranodus-plugin-yellow-highlight"
-								)
-							);
-						} catch (err) {}
-
-						const newWordsSelected = newWordsToSearch.filter(
-							(word: string) => {
-								if (wordsToSearch.includes(word)) return false;
-								return true;
-							}
-						);
-						if (newWordsSelected.length > 0) {
-							lastSelectedWordRef.current = newWordsSelected[0];
-						}
-
-						setConnectedWords(_connectedWords);
-
-						setWordsToSearch(newWordsToSearch);
-					}
-					break;
-				case EventTypes.REMOVED_NODES:
-					if (!payload) payload = [];
-					setIsHidingWords(payload.length > 0);
-					// console.log("palette", payload, wordsToHide);
-					if (!arraysAreEqual(wordsToHide, payload)) {
-						const newWordsToHide = Array.from(
-							new Set(payload)
-						) as string[];
-						// console.log(
-						// 	"setting new words to hide",
-						// 	newWordsToHide
-						// );
-						setWordsToHide(newWordsToHide);
-					}
-
-					break;
-				case EventTypes.GROUPS:
-					setCurrentGraphPanel("topics");
-					if (!arraysAreEqual(topicsFiltered, payload)) {
-						setTopicsFiltered(payload);
-					}
-
-					break;
-				case EventTypes.GAPS:
-					setCurrentGraphPanel("gaps");
-					if (gapShown !== payload) {
-						setGapShown(payload);
-					}
-					break;
-				case EventTypes.EXTERNAL_ACTION: {
-					const meta = (message.data as any).meta;
-					// Dual-shape contract — when the graph emits the v1+ meta
-					// envelope we route on meta.action directly. Selection has
-					// already propagated via SELECTED_NODES/GROUPS messages
-					// before this dispatch arrives, so wordsToSearch and
-					// topicsFiltered reflect any auto-selection from the
-					// Concepts/Trends layers.
-					if (meta && meta.version >= 1) {
-						switch (meta.action) {
-							case "question":
-							case "develop":
-							case "transcend":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode(meta.action);
-								}, 100);
-								break;
-							case "summarize":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode("summary");
-								}, 100);
-								break;
-							case "chat":
-								setOverlayShowMode("aiChat");
-								break;
-							case "context":
-							case "context_gap":
-								setAdviceMode("context");
-								setOverlayShowMode("context");
-								showGraphContextAdvice({
-									wordsToSearch,
-									source: meta.action === "context_gap" ? "gap" : "next",
-									topicsFiltered,
-								});
-								if (!Platform.isMobileApp && !Platform.isMobile)
-									getMentionsOfFile(
-										app,
-										filePath || "",
-										wordsToSearch
-									);
-								break;
-						}
-						break;
-					}
-					if (!payload) payload = [];
-					if (payload.length > 0) {
-						switch (payload) {
-							case "question":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode("question");
-								}, 100);
-
-								break;
-							case "develop":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode("develop");
-								}, 100);
-
-								break;
-							case "transcend":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode("transcend");
-								}, 100);
-
-								break;
-							case "summary":
-							case "summarize":
-								setAdviceMode("none");
-								setTimeout(() => {
-									setAdviceMode("summary");
-								}, 100);
-
-								break;
-							case "chat":
-								setOverlayShowMode("aiChat");
-								break;
-							case "context_gap":
-								setAdviceMode("context");
-								setOverlayShowMode("context");
-								showGraphContextAdvice({
-									wordsToSearch,
-									source: "gap",
-									topicsFiltered,
-								});
-								if (!Platform.isMobileApp && !Platform.isMobile)
-									getMentionsOfFile(
-										app,
-										filePath || "",
-										wordsToSearch
-									);
-
-								break;
-							case "context":
-								setAdviceMode("context");
-								setOverlayShowMode("context");
-								showGraphContextAdvice({
-									wordsToSearch,
-									source: "next",
-									topicsFiltered,
-								});
-								if (!Platform.isMobileApp && !Platform.isMobile)
-									getMentionsOfFile(
-										app,
-										filePath || "",
-										wordsToSearch
-									);
-
-								break;
-							case "topics":
-								setCurrentGraphPanel("topics");
-								break;
-							case "graph":
-								setCurrentGraphPanel("graph");
-								break;
-							case "gap":
-								setCurrentGraphPanel("gaps");
-								break;
-							case "trends":
-								setCurrentGraphPanel("trends");
-								break;
-							case "concepts":
-								setCurrentGraphPanel("concepts");
-								break;
-						}
-					}
-					if (payload.type) {
-						if (
-							payload.type == "statement" &&
-							payload.nodes &&
-							filteredStatementsRef.current &&
-							filteredStatementsRef.current.length > 0
-						) {
-							setAdviceMode("context");
-							setOverlayShowMode("context");
-							showGraphContextAdvice({
-								wordsToSearch,
-								source: "next",
-								topicsFiltered,
-							});
-							if (!Platform.isMobileApp && !Platform.isMobile)
-								getMentionsOfFile(
-									app,
-									filePath || "",
-									wordsToSearch
-								);
-							// const receivedNodes = payload.nodes;
-							// const clusterIndex = receivedNodes.join("_");
-
-							// const statementToJumpTo = getStatementToJumpTo({
-							// 	clusterIndex,
-							// 	filteredStatementsRef,
-							// 	previousStatementToJumpToRef,
-							// 	statementToJumpToRef,
-							// });
-
-							// await jumpToStatementAndOpenFile({
-							// 	app,
-							// 	filePath,
-							// 	statementToJumpTo,
-							// });
-						}
-
-						if (payload.clusters) {
-							setAdviceMode("context");
-							setOverlayShowMode("context");
-
-							const sourceType =
-								payload.mode == "locate_gaps" ? "gap" : "next";
-
-							showGraphContextAdvice({
-								wordsToSearch,
-								source: sourceType,
-								topicsFiltered,
-							});
-							if (!Platform.isMobileApp && !Platform.isMobile)
-								getMentionsOfFile(
-									app,
-									filePath || "",
-									wordsToSearch
-								);
-						}
-
-						if (payload.type == "click") {
-							const receivedNodes = payload.nodes;
-
-							navigateToStatement({
-								app,
-								filePath: filePath || "",
-								filteredStatements: [],
-								wordsToSearch: [
-									receivedNodes[receivedNodes.length - 1],
-								],
-								graphContext: params.graphContext,
-							});
-						}
-
-						if (payload.type == "search") {
-							const receivedNodes = payload.nodes;
-							if (
-								Array.isArray(receivedNodes) &&
-								receivedNodes.length > 0
-							) {
-								const query = receivedNodes
-									.map((rawNode: string) => {
-										const node = String(rawNode);
-										const wikilink = node.match(
-											/^\[\[(.+)\]\]$/
-										);
-										if (wikilink) {
-											const inner = wikilink[1]
-												.replace(/_/g, " ")
-												.trim();
-											return inner.length > 0
-												? `"${inner}"`
-												: "";
-										}
-										return node.trim();
-									})
-									.filter((n: string) => n.length > 0)
-									.join(" ");
-								if (query.length > 0) {
-									const searchPlugin = (
-										app as any
-									).internalPlugins?.getPluginById?.(
-										"global-search"
-									);
-									searchPlugin?.instance?.openGlobalSearch?.(
-										query
-									);
-								}
-							}
-						}
-					}
-
-					if (!payload || (payload && payload.length == 0)) {
-						setCurrentGraphPanel("graph");
-					}
-					break;
-				}
-				default:
-					break;
+		const newWordsToSearch: string[] = Array.from(new Set(payload));
+		const wordsUnselected = wordsToSearch.filter((word: string) => {
+			if (newWordsToSearch.includes(word)) return false;
+			if (lastSelectedWordRef.current === word) {
+				lastSelectedWordRef.current = newWordsToSearch[0];
 			}
-		};
-		window?.addEventListener("message", onMessage);
-		return () => {
-			window?.removeEventListener("message", onMessage);
-		};
-	}, []);
+			return true;
+		});
+
+		try {
+			const allStatements =
+				extractedGraphDataRef.current?.all_statements_with_top;
+			const unselectedStatements = filterStatements({
+				statements: allStatements ?? [],
+				wordsToSearch: wordsUnselected,
+				wordsToHide,
+				connectedWords: connected,
+			}).map((statement) => statement.content ?? "");
+			const elements = await unhighlightStatements(app, unselectedStatements);
+			unObserveElementAttributes(elements);
+			elements.forEach((el) =>
+				el.classList.remove("infranodus-plugin-yellow-highlight")
+			);
+		} catch (err) {}
+
+		const newWordsSelected = newWordsToSearch.filter(
+			(word: string) => !wordsToSearch.includes(word)
+		);
+		if (newWordsSelected.length > 0) {
+			lastSelectedWordRef.current = newWordsSelected[0];
+		}
+		if (newWordsToSearch.length > 0) setTopicsFiltered([]);
+		setConnectedWords(connected);
+		setWordsToSearch(newWordsToSearch);
+	}
+
+	function handleHideNodes(payload: string[]) {
+		const { wordsToHide } = stateForMessagesRef.current;
+		setIsHidingWords(payload.length > 0);
+		if (arraysAreEqual(wordsToHide, payload)) return;
+		const { wordsToSearch } = stateForMessagesRef.current;
+		const remaining = wordsToSearch.filter((w) => !payload.includes(w));
+		if (remaining.length !== wordsToSearch.length) setWordsToSearch(remaining);
+		setWordsToHide(Array.from(new Set(payload)));
+	}
+
+	function handleSelectTopics(ids: string[]) {
+		const { topicsFiltered } = stateForMessagesRef.current;
+		setCurrentGraphPanel("topics");
+		if (ids.length > 0 && stateForMessagesRef.current.wordsToSearch.length > 0)
+			setWordsToSearch([]);
+		if (ids.length === 0) setGapShown(false);
+		if (!arraysAreEqual(topicsFiltered, ids)) setTopicsFiltered(ids);
+	}
+
+	function handleShowGap(index: number | false, communities?: string[]) {
+		setCurrentGraphPanel("gaps");
+		setGapShown(index);
+		let ids = communities || [];
+		if (index !== false && ids.length === 0) {
+			const gap: any =
+				extractedGraphDataRef.current?.gaps_extracted?.[index - 1];
+			if (gap) ids = [String(gap.from.community), String(gap.to.community)];
+		}
+		if (stateForMessagesRef.current.wordsToSearch.length > 0)
+			setWordsToSearch([]);
+		setTopicsFiltered(index === false ? [] : ids);
+	}
+
+	function showContext(source: "next" | "gap") {
+		const { wordsToSearch, topicsFiltered } = stateForMessagesRef.current;
+		setAdviceMode("context");
+		setOverlayShowMode("context");
+		showGraphContextAdvice({ wordsToSearch, source, topicsFiltered });
+		if (!Platform.isMobileApp && !Platform.isMobile)
+			getMentionsOfFile(app, filePath || "", wordsToSearch);
+	}
+
+	function handleAction(action: GraphAction) {
+		switch (action) {
+			case "question":
+			case "develop":
+			case "transcend":
+				setAdviceMode("none");
+				setTimeout(() => setAdviceMode(action), 100);
+				break;
+			case "summarize":
+				setAdviceMode("none");
+				setTimeout(() => setAdviceMode("summary"), 100);
+				break;
+			case "chat":
+				setOverlayShowMode("aiChat");
+				break;
+			case "context":
+				showContext("next");
+				break;
+			case "context_gap":
+				showContext("gap");
+				break;
+		}
+	}
+
+	function openVaultSearch(node: string) {
+		const wikilink = node.match(/^\[\[(.+)\]\]$/);
+		const query = wikilink ? `"${wikilink[1].trim()}"` : node.trim();
+		const searchPlugin = (app as any).internalPlugins?.getPluginById?.(
+			"global-search"
+		);
+		searchPlugin?.instance?.openGlobalSearch?.(query);
+	}
+
+	function handleOpenNode(node: string) {
+		if (node.startsWith("[[") && node.endsWith("]]")) {
+			navigateToStatement({
+				app,
+				filePath: filePath || "",
+				filteredStatements: [],
+				wordsToSearch: [node],
+				graphContext: params.graphContext,
+			});
+		} else {
+			openVaultSearch(node);
+		}
+	}
+
+	// Stable callbacks for the canvas (always call the latest handlers)
+	const handlersRef = useRef({
+		handleSelectNodes,
+		handleHideNodes,
+		handleSelectTopics,
+		handleShowGap,
+		handleAction,
+		handleOpenNode,
+		openVaultSearch,
+	});
+	handlersRef.current = {
+		handleSelectNodes,
+		handleHideNodes,
+		handleSelectTopics,
+		handleShowGap,
+		handleAction,
+		handleOpenNode,
+		openVaultSearch,
+	};
 
 	// Check for changes in text, but only for manual
 	useEffect(() => {
@@ -1091,20 +703,6 @@ const GraphView = (params: {
 		};
 	}, []);
 
-	function sendDataToIframe(type: string, payload: any) {
-		// console.log("InfraNodus Sending data to iframe", type, payload);
-		const iframeWindow = graph_iframe.current?.contentWindow;
-		if (!iframeWindow) {
-			console.log(
-				"InfraNodus: cannot send to iframe, it is not mounted",
-				type
-			);
-			return false;
-		}
-		iframeWindow.postMessage({ type, payload }, "*");
-		return true;
-	}
-
 	const graphHeight = getGraphHeight({
 		topTextElement: graph_top_text.current,
 		maxHeight: params.graphContext.maxHeight,
@@ -1147,7 +745,9 @@ const GraphView = (params: {
 						filteredStatements={filteredStatementsRef.current}
 						topicsFiltered={topicsFiltered}
 						navigateToStatement={navigateToStatement}
-						sendDataToIframe={sendDataToIframe}
+						showGap={(index: number) =>
+							handlersRef.current.handleShowGap(index)
+						}
 						currentGraphPanel={currentGraphPanel}
 						// showingGraphAdvice={showingGraphAdvice}
 						// adviceMode="question"
@@ -1175,43 +775,32 @@ const GraphView = (params: {
 						</InfoTooltip>
 					)}
 
-					{!showingSettings && (
+					{!showingSettings && graphData && (
 						<InfoTooltip
-							text="Export content to InfraNodus"
+							text="Save graph report to a note"
 							direction="right"
 						>
 							<IconButton
-								icon={
-									exportedGraph
-										? CheckIcon
-										: CrossReferenceIcon
-								}
-								onClick={() => {
-									if (exportedGraph) return;
+								icon={exportedGraph ? CheckIcon : NoteIcon}
+								onClick={async () => {
+									if (exportedGraph || !extractedGraphDataRef.current)
+										return;
 									setExportedGraph(true);
-									const statementsArray =
-										extractedGraphDataRef?.current
-											?.all_statements_with_top || [];
-									const contentToCopy = statementsArray
-										.map((statement) => statement.content)
-										.join("\n");
-
-									exportGraphToInfraNodus({
-										app,
-										text: contentToCopy,
-										defaultGraphName:
-											encodeInfraNodusGraphName(
-												filePath || "",
-												SETTINGS.EXPORT_GRAPH,
-												vaultName
-											),
-										sourceFile: filePath,
-									});
-
-									setTimeout(
-										() => setExportedGraph(false),
-										2000
-									);
+									try {
+										await saveGraphReport({
+											app,
+											title:
+												(filePath && cleanFilePath) ||
+												sourcePath ||
+												"Graph",
+											graphData: graphData!,
+											extracted: extractedGraphDataRef.current,
+											topicNames,
+										});
+									} catch (err) {
+										new Notice(`Could not save report: ${err.message || err}`);
+									}
+									setTimeout(() => setExportedGraph(false), 2000);
 								}}
 							/>
 						</InfoTooltip>
@@ -1230,38 +819,34 @@ const GraphView = (params: {
 				</div>
 
 				<div id="graph-container" className="relative h-min mr-2">
-					{showIframe && (
-						<iframe
-							id="graph-iframe"
-							ref={graph_iframe}
-							src={
-								graphLink +
-								`&theme=${
-									colorScheme === "auto"
-										? obsidianColorSchemeRef.current
-										: colorScheme
-								}` +
-								iframeGraphUser
-							}
-							width="100%"
-							height={`${graphHeight}px`}
-							title="Infranodus 3D"
-							allowFullScreen
-							className="relative bg-gray-200 border-0 outline-none dark:bg-[#0d1117] px-1 py-1 rounded"
-							scrolling="no"
-							allow="clipboard-write"
-							style={{ overflow: "hidden" }}
-							onError={() => {
-								setError((current) => {
-									if (current) return current;
-									setErrorText(
-										"Could not load the InfraNodus graph viewer iframe."
-									);
-									return "generic-error";
-								});
-							}}
-						></iframe>
-					)}
+					<LocalGraph
+						graphData={graphData}
+						topicNames={topicNames}
+						colorScheme={
+							colorScheme === "auto"
+								? obsidianColorSchemeRef.current
+								: colorScheme
+						}
+						height={graphHeight}
+						wordsToSearch={wordsToSearch}
+						wordsToHide={wordsToHide}
+						topicsFiltered={topicsFiltered}
+						gapShown={gapShown}
+						panel={currentGraphPanel}
+						isLoading={isLoadingIframe}
+						onSelectNodes={(w, c) =>
+							handlersRef.current.handleSelectNodes(w, c)
+						}
+						onHideNodes={(w) => handlersRef.current.handleHideNodes(w)}
+						onSelectTopics={(ids) =>
+							handlersRef.current.handleSelectTopics(ids)
+						}
+						onShowGap={(i, c) => handlersRef.current.handleShowGap(i, c)}
+						onAction={(a) => handlersRef.current.handleAction(a)}
+						onOpenNode={(n) => handlersRef.current.handleOpenNode(n)}
+						onSearchNode={(n) => handlersRef.current.openVaultSearch(n)}
+						onPanelChange={(p) => setCurrentGraphPanel(p)}
+					/>
 					{!showIframe && !error && (
 						<div
 							className="w-full bg-gray-300 dark:bg-gray-800"
