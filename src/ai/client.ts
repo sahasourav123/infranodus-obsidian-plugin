@@ -7,9 +7,11 @@
  *              avoids CORS inside Obsidian)
  * - cli:       a local CLI that is signed in with a subscription
  *              (codex exec / claude -p); prompt on stdin
+ * - chatgpt:   ChatGPT plan over OAuth (see ./chatgpt.ts)
  */
 import { App, Platform, requestUrl, RequestUrlResponse } from "obsidian";
 import { SETTINGS } from "src/settings";
+import { completeChatGpt, listChatGptModels, setChatGptApp } from "./chatgpt";
 import {
 	AiProvider,
 	AiTask,
@@ -34,6 +36,7 @@ interface CompleteParams {
 let appRef: App | null = null;
 function setAiApp(app: App) {
 	appRef = app;
+	setChatGptApp(app);
 }
 
 function getApiKey(p: AiProvider): string {
@@ -438,6 +441,8 @@ async function completeWith(p: AiProvider, params: CompleteParams): Promise<stri
 			return completeAnthropic(p, params);
 		case "cli":
 			return completeCli(p, params);
+		case "chatgpt":
+			return completeChatGpt(p, params);
 		default:
 			return completeOpenAi(p, params);
 	}
@@ -461,6 +466,7 @@ async function embed(inputs: string[]): Promise<number[][]> {
 
 async function listModels(p: AiProvider): Promise<string[]> {
 	if (p.type === "cli") return [];
+	if (p.type === "chatgpt") return listChatGptModels(p);
 	if (p.type === "anthropic") {
 		const res = await requestUrl({
 			url: `${trimSlash(p.baseUrl || "https://api.anthropic.com")}/v1/models?limit=100`,

@@ -4,13 +4,14 @@
  * A *profile* is one way to reach a model: a local OpenAI-compatible
  * server (Bionic / LM Studio / Ollama), a cloud API key (OpenAI, xAI,
  * Anthropic, OpenRouter …) or a subscription-backed CLI (Codex CLI signed
- * in with ChatGPT, Claude Code signed in with a Claude plan).
+ * in with ChatGPT, Claude Code signed in with a Claude plan) or ChatGPT
+ * itself, signed in over OAuth from the plugin settings.
  *
  * Each *task* (topic naming, insights, chat, semantic search) is routed to
  * one profile, so different work can go to different models.
  */
 
-type AiProviderType = "openai" | "anthropic" | "cli";
+type AiProviderType = "openai" | "anthropic" | "cli" | "chatgpt";
 
 type ReasoningEffort = "" | "none" | "low" | "medium" | "high";
 
@@ -160,6 +161,20 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
 			reasoningEffort: "",
 			temperature: 0.4,
 			maxTokens: 8000,
+		}),
+	},
+	{
+		key: "chatgpt",
+		label: "ChatGPT subscription (sign in with ChatGPT)",
+		description:
+			"Your ChatGPT plan over OAuth, no API key or CLI. Sign in from the provider settings. Desktop only.",
+		make: () => ({
+			name: "ChatGPT",
+			type: "chatgpt",
+			baseUrl: "https://chatgpt.com/backend-api/codex",
+			apiKeySecret: "",
+			model: "gpt-6.1-sol",
+			reasoningEffort: "low",
 		}),
 	},
 	{

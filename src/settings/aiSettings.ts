@@ -14,6 +14,7 @@ import {
 	newProviderId,
 } from "src/ai/types";
 import { getProviders, listModels, testProvider } from "src/ai/client";
+import { getChatGptAccount, signInChatGpt, signOutChatGpt } from "src/ai/chatgpt";
 
 type Save = (settings: any) => Promise<void>;
 
@@ -32,7 +33,7 @@ function renderAiSettings(params: {
 	new Setting(containerEl).setName("AI").setHeading();
 	const intro = containerEl.createEl("p", { cls: "setting-item-description" });
 	intro.setText(
-		"The graph is built locally. AI requests go only to the providers you add here: local servers (Bionic, LM Studio, Ollama), API keys (Claude, OpenAI, Grok) or subscription CLIs (Codex for ChatGPT, Claude Code). Keys are kept in Obsidian's secret storage, not in the plugin data."
+		"The graph is built locally. AI requests go only to the providers you add here: local servers (Bionic, LM Studio, Ollama), API keys (Claude, OpenAI, Grok) your ChatGPT plan (sign in with ChatGPT) or subscription CLIs (Codex, Claude Code). Keys and sign-ins are kept in Obsidian's secret storage, not in the plugin data."
 	);
 
 	// --------------------------------------------------- routing
@@ -100,7 +101,14 @@ function renderAiSettings(params: {
 		const summary = box.createEl("summary");
 		summary.style.cursor = "pointer";
 		summary.style.padding = "6px 0";
-		const kind = p.type === "cli" ? "subscription CLI" : p.type === "anthropic" ? "Anthropic API" : "OpenAI-compatible";
+		const kind =
+			p.type === "cli"
+				? "subscription CLI"
+				: p.type === "chatgpt"
+				? "ChatGPT sign-in"
+				: p.type === "anthropic"
+				? "Anthropic API"
+				: "OpenAI-compatible";
 		summary.setText(`${p.name}  ·  ${kind}${p.model ? `  ·  ${p.model}` : ""}`);
 
 		new Setting(box).setName("Name").addText((t) =>
@@ -110,7 +118,44 @@ function renderAiSettings(params: {
 			})
 		);
 
-		if (p.type !== "cli") {
+		if (p.type === "chatgpt") {
+			const account = getChatGptAccount();
+			const accountSetting = new Setting(box)
+				.setName("ChatGPT account")
+				.setDesc(
+					account
+						? `Signed in${account.email ? ` as ${account.email}` : ""}${account.plan ? ` · ${account.plan} plan` : ""}. Shared by every ChatGPT provider in this vault.`
+						: "Not signed in. Opens chatgpt.com in your browser; the sign-in is stored in the system keychain."
+				);
+			accountSetting.addButton((b) => {
+				b.setButtonText(account ? "Sign in again" : "Sign in with ChatGPT");
+				if (!account) b.setCta();
+				b.onClick(async () => {
+					b.setDisabled(true);
+					b.setButtonText("Waiting for browser…");
+					try {
+						const acc = await signInChatGpt();
+						new Notice(`ChatGPT connected${acc.email ? `: ${acc.email}` : ""}.`, 6000);
+						refresh();
+					} catch (err) {
+						new Notice(String(err.message || err), 10000);
+						b.setDisabled(false);
+						b.setButtonText(account ? "Sign in again" : "Sign in with ChatGPT");
+					}
+				});
+			});
+			if (account) {
+				accountSetting.addButton((b) =>
+					b.setButtonText("Sign out").onClick(() => {
+						signOutChatGpt();
+						new Notice("Signed out of ChatGPT.");
+						refresh();
+					})
+				);
+			}
+		}
+
+		if (p.type === "openai" || p.type === "anthropic") {
 			new Setting(box)
 				.setName("Base URL")
 				.setDesc(p.type === "anthropic" ? "https://api.anthropic.com" : "OpenAI style, ends with /v1")
@@ -149,7 +194,13 @@ function renderAiSettings(params: {
 
 		const modelSetting = new Setting(box)
 			.setName("Model")
-			.setDesc(p.type === "cli" ? "Optional; blank = the CLI's default model." : "Blank = first model the server lists.");
+			.setDesc(
+				p.type === "cli"
+					? "Optional; blank = the CLI's default model."
+					: p.type === "chatgpt"
+					? "A model your ChatGPT plan offers, e.g. gpt-6.1-sol (workhorse) or gpt-6-luna (fast)."
+					: "Blank = first model the server lists."
+			);
 		let modelInput: obsidian.TextComponent | null = null;
 		modelSetting.addText((t) => {
 			modelInput = t;
@@ -232,22 +283,25 @@ function renderAiSettings(params: {
 				.setDesc(
 					p.type === "anthropic"
 						? "Claude effort level (none = low)."
+						: p.type === "chatgpt"
+						? "How long the model thinks. Low is fastest."
 						: "Sent as reasoning_effort. 'none' turns thinking off on Qwen3-style local models (much faster)."
 				)
-				.addDropdown((dd) =>
-					dd
-						.addOption("", "Provider default")
-						.addOption("none", "None")
-						.addOption("low", "Low")
+				.addDropdown((dd) => {
+					dd.addOption("", "Model default");
+					if (p.type !== "chatgpt") dd.addOption("none", "None");
+					dd.addOption("low", "Low")
 						.addOption("medium", "Medium")
 						.addOption("high", "High")
-						.setValue(p.reasoningEffort || "")
+						.setValue(p.type === "chatgpt" && p.reasoningEffort === "none" ? "low" : p.reasoningEffort || "")
 						.onChange(async (v) => {
 							p.reasoningEffort = v as any;
 							await persist();
-						})
-				);
+						});
+				});
+		}
 
+		if (p.type === "openai" || p.type === "anthropic") {
 			new Setting(box).setName("Max output tokens").addText((t) =>
 				t.setValue(String(p.maxTokens ?? "")).onChange(async (v) => {
 					const n = parseInt(v, 10);

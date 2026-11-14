@@ -15,6 +15,7 @@ This fork runs **without the InfraNodus service**. The text network (concepts, t
 
 - Local OpenAI-compatible servers: **Bionic / LM Studio** (`http://127.0.0.1:1235/v1` or `:1234/v1`), Ollama, LiteLLM, any `/v1/chat/completions` server. Set *Reasoning effort = None* for Qwen3-style thinking models; it is much faster.
 - API keys: **Claude (Anthropic)**, **OpenAI**, **Grok (xAI)**, OpenRouter. Keys are stored in Obsidian's secret storage (system keychain), not in `data.json`.
+- **ChatGPT subscription, signed in over OAuth** (desktop only): add the *ChatGPT subscription (sign in with ChatGPT)* provider and click **Sign in with ChatGPT**. The browser opens the ChatGPT sign-in, the plugin catches the redirect on `localhost:1455`, and the tokens go to Obsidian's secret storage (system keychain), refreshed automatically. Requests use your plan's Codex allowance; no API key or CLI needed. The plugin's sign-in is separate from the Codex CLI's, so neither logs the other out.
 - Subscriptions via their official CLIs (desktop only): **ChatGPT** through `codex exec` (Codex CLI signed in with your ChatGPT plan) and **Claude** through `claude -p` (Claude Code signed in with your Claude plan). The prompt goes to the CLI on stdin.
 - Grok subscriptions (SuperGrok / X Premium) have no official API or CLI access; use an xAI API key.
 
