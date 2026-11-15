@@ -2,7 +2,7 @@
  * AI provider profiles and task routing.
  *
  * A *profile* is one way to reach a model: a local OpenAI-compatible
- * server (Bionic / LM Studio / Ollama), a cloud API key (OpenAI, xAI,
+ * server (LiteLLM gateway / LM Studio / Ollama), a cloud API key (OpenAI, xAI,
  * Anthropic, OpenRouter …) or a subscription-backed CLI (Codex CLI signed
  * in with ChatGPT, Claude Code signed in with a Claude plan) or ChatGPT
  * itself, signed in over OAuth from the plugin settings.
@@ -55,19 +55,21 @@ interface ProviderPreset {
 
 const PROVIDER_PRESETS: ProviderPreset[] = [
 	{
-		key: "bionic",
-		label: "Bionic (local, LM Studio)",
-		description: "Local OpenAI-compatible server started by Bionic.",
+		key: "litellm",
+		label: "LiteLLM gateway (local models + Claude)",
+		description:
+			"LiteLLM proxy in front of LM Studio and cloud APIs. Needs a LiteLLM key; models are called by id.",
 		make: () => ({
-			name: "Bionic (local)",
+			name: "LiteLLM (Qwen 3.8)",
 			type: "openai",
 			baseUrl: "http://127.0.0.1:1235/v1",
-			apiKeySecret: "",
-			model: "",
+			apiKeySecret: "litellm-api-key",
+			// LiteLLM's /v1/models does not list wildcard-routed local models, so name it here
+			model: "qwen/qwen3.8-27b",
 			embeddingModel: "text-embedding-nomic-embed-text-v1.5",
 			reasoningEffort: "none",
 			temperature: 0.4,
-			maxTokens: 4096,
+			maxTokens: 2048,
 		}),
 	},
 	{
@@ -233,16 +235,16 @@ function newProviderId() {
 
 const DEFAULT_PROVIDERS: AiProvider[] = [
 	{
-		id: "local-bionic",
+		id: "litellm",
 		...PROVIDER_PRESETS[0].make(),
 	},
 ];
 
 const DEFAULT_ROUTES: AiRoutes = {
-	topics: "local-bionic",
-	insights: "local-bionic",
-	chat: "local-bionic",
-	embeddings: "local-bionic",
+	topics: "litellm",
+	insights: "litellm",
+	chat: "litellm",
+	embeddings: "litellm",
 };
 
 const TASK_LABELS: Record<AiTask, { name: string; desc: string }> = {

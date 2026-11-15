@@ -117,7 +117,7 @@ const ErrorHandler = (params: {
 							params.errorText == "net::ERR_NAME_NOT_RESOLVED") && (
 							<p>
 								Could not reach the AI provider. Check that your
-								local server (Bionic / LM Studio) is running, or
+								local server (LiteLLM / LM Studio) is running, or
 								the provider settings.
 							</p>
 						)}

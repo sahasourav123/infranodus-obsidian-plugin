@@ -1,7 +1,7 @@
 /**
  * Finds the statements most related to a query — replaces the InfraNodus
  * `api/v1/aiSearch` endpoint. Uses embeddings from the configured
- * provider (e.g. nomic-embed on Bionic) and falls back to keyword (BM25)
+ * provider (e.g. nomic-embed on LM Studio, via LiteLLM) and falls back to keyword (BM25)
  * scoring when no embedding model is available.
  */
 import { STOPWORDS } from "src/engine/stopwords";
