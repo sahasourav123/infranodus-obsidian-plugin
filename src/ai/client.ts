@@ -1,7 +1,7 @@
 /**
  * Provider-neutral chat completion, embeddings and model listing.
  *
- * - openai:    any OpenAI-compatible server (Bionic, LM Studio, Ollama,
+ * - openai:    any OpenAI-compatible server (LiteLLM, LM Studio, Ollama,
  *              OpenAI, xAI, OpenRouter, LiteLLM …)
  * - anthropic: Anthropic Messages API (raw HTTP through requestUrl, which
  *              avoids CORS inside Obsidian)
@@ -96,7 +96,13 @@ function errorFromResponse(p: AiProvider, res: RequestUrlResponse): Error {
 		detail = (res.text || "").slice(0, 300);
 	}
 	if (typeof detail !== "string") detail = JSON.stringify(detail);
-	return new Error(`${p.name}: HTTP ${res.status} — ${detail}`);
+	let hint = "";
+	if ((res.status === 401 || res.status === 403) && p.type !== "cli" && p.type !== "chatgpt") {
+		hint = getApiKey(p)
+			? " (the key was rejected: check the API key in this provider's settings)"
+			: ` (no API key stored${p.apiKeySecret ? ` in secret "${p.apiKeySecret}"` : ""}: Settings → InfraNodus Local AI Graph → ${p.name} → API key)`;
+	}
+	return new Error(`${p.name}: HTTP ${res.status} — ${detail}${hint}`);
 }
 
 // ---------------------------------------------------------------- openai
@@ -105,7 +111,7 @@ const NON_CHAT = /embed|rerank|whisper|tts|phonon|speech|vision-encoder/i;
 const detectedModels = new Map<string, string>();
 
 /**
- * Pick a chat model when none is set. LM Studio / Bionic expose
+ * Pick a chat model when none is set. LM Studio exposes
  * /api/v0/models with type and load state: prefer the loaded LLM with the
  * largest context. Otherwise take the first non-embedding model.
  */

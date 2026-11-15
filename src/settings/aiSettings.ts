@@ -33,7 +33,7 @@ function renderAiSettings(params: {
 	new Setting(containerEl).setName("AI").setHeading();
 	const intro = containerEl.createEl("p", { cls: "setting-item-description" });
 	intro.setText(
-		"The graph is built locally. AI requests go only to the providers you add here: local servers (Bionic, LM Studio, Ollama), API keys (Claude, OpenAI, Grok) your ChatGPT plan (sign in with ChatGPT) or subscription CLIs (Codex, Claude Code). Keys and sign-ins are kept in Obsidian's secret storage, not in the plugin data."
+		"The graph is built locally. AI requests go only to the providers you add here: local servers (LiteLLM, LM Studio, Ollama), API keys (Claude, OpenAI, Grok) your ChatGPT plan (sign in with ChatGPT) or subscription CLIs (Codex, Claude Code). Keys and sign-ins are kept in Obsidian's secret storage, not in the plugin data."
 	);
 
 	// --------------------------------------------------- routing
